@@ -35,6 +35,7 @@
   --shadow: 0 1px 2px rgba(0,0,0,0.04);
   --safe-top: env(safe-area-inset-top);
   --safe-bottom: env(safe-area-inset-bottom);
+  --app-max: 480px;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -84,9 +85,21 @@ header.app-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  max-width: var(--app-max);
+  margin: 0 auto;
 }
 .app-title { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; margin: 0; }
 .app-subtitle { font-size: 12px; color: var(--text-dim); margin-top: 1px; }
+.head-btn {
+  width: 36px; height: 36px;
+  border-radius: 10px;
+  background: var(--bg-card);
+  border: 0.5px solid var(--border-strong);
+  display: flex; align-items: center; justify-content: center;
+  padding: 0;
+  color: var(--text);
+}
+.head-btn svg { width: 18px; height: 18px; stroke-width: 1.8; }
 
 /* Bottom tab nav */
 nav.tabs {
@@ -96,10 +109,14 @@ nav.tabs {
   right: 0;
   background: var(--bg-card);
   border-top: 0.5px solid var(--border);
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
   padding-bottom: var(--safe-bottom);
   z-index: 50;
+}
+.tabs-inner {
+  max-width: var(--app-max);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
 }
 .tab-btn {
   background: transparent;
@@ -113,12 +130,51 @@ nav.tabs {
   font-size: 11px;
   font-weight: 500;
   transition: color 0.15s;
+  position: relative;
 }
 .tab-btn.active { color: var(--text); }
+.tab-btn.active::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 32px;
+  height: 2px;
+  background: var(--text);
+  border-radius: 0 0 2px 2px;
+}
 .tab-btn svg { width: 22px; height: 22px; stroke-width: 1.8; }
-.tab-btn span { font-size: 11px; }
+.tab-btn .label { font-size: 11px; }
 
-main { padding: 12px 16px 16px; }
+.tab-icon-wrap {
+  position: relative;
+  display: inline-block;
+  width: 22px;
+  height: 22px;
+}
+.tab-badge {
+  position: absolute;
+  top: -6px;
+  right: -10px;
+  background: var(--danger);
+  color: white;
+  border-radius: 999px;
+  font-size: 10px;
+  padding: 1px 5px;
+  font-weight: 700;
+  min-width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+@media (prefers-color-scheme: dark) {
+  .tab-badge { color: #1c1917; }
+}
+
+main { padding: 12px 16px 16px; max-width: var(--app-max); margin: 0 auto; }
 .panel { display: none; }
 .panel.active { display: block; animation: fadeIn 0.15s; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
@@ -131,31 +187,21 @@ main { padding: 12px 16px 16px; }
   border-radius: var(--radius);
   padding: 12px;
 }
-.metric-label { font-size: 11px; color: var(--text-soft); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
-.metric-value { font-size: 28px; font-weight: 700; margin-top: 4px; letter-spacing: -0.02em; }
+.metric-label { font-size: 10px; color: var(--text-soft); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; line-height: 1.2; }
+.metric-value { font-size: 28px; font-weight: 700; margin-top: 4px; letter-spacing: -0.02em; line-height: 1; }
 .metric.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 .metric.primary .metric-label { color: rgba(255,255,255,0.7); }
+@media (prefers-color-scheme: dark) {
+  .metric.primary .metric-label { color: rgba(0,0,0,0.6); }
+}
 .metric.danger .metric-value { color: var(--danger); }
 .metric.warn .metric-value { color: var(--warn); }
-
-/* Section titles */
-.section-title {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  font-weight: 600;
-  color: var(--text-soft);
-  margin: 18px 0 8px;
-  padding-bottom: 6px;
-  border-bottom: 0.5px solid var(--border);
-}
-.section-title:first-child { margin-top: 0; }
 
 /* Filter chips */
 .filter-bar {
   display: flex;
   gap: 6px;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   padding-bottom: 4px;
@@ -165,7 +211,7 @@ main { padding: 12px 16px 16px; }
   background: var(--bg-card);
   border: 0.5px solid var(--border-strong);
   border-radius: 999px;
-  padding: 6px 12px;
+  padding: 7px 14px;
   font-size: 13px;
   white-space: nowrap;
   color: var(--text-soft);
@@ -184,15 +230,38 @@ main { padding: 12px 16px 16px; }
   font-size: 15px;
 }
 
-/* Product item */
-.cat-header {
+/* Section titles & category headers */
+.section-title {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   font-weight: 600;
   color: var(--text-soft);
-  margin: 14px 0 6px;
+  margin: 18px 0 8px;
+  padding-bottom: 6px;
+  border-bottom: 0.5px solid var(--border);
 }
+.section-title:first-child { margin-top: 0; }
+
+.cat-header {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+  color: var(--text-soft);
+  margin: 16px 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cat-header::after {
+  content: '';
+  flex: 1;
+  height: 0.5px;
+  background: var(--border);
+}
+
+/* Product item */
 .item {
   display: flex;
   align-items: center;
@@ -203,9 +272,21 @@ main { padding: 12px 16px 16px; }
   border-radius: var(--radius);
   margin-bottom: 6px;
   box-shadow: var(--shadow);
+  position: relative;
+  overflow: hidden;
 }
 .item.low { background: var(--warn-bg); border-color: var(--warn-border); }
-.item.zero { background: var(--danger-bg); border-color: var(--danger-border); }
+.item.zero {
+  background: var(--danger-bg);
+  border-color: var(--danger);
+}
+.item.zero::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  background: var(--danger);
+}
 .item-main { flex: 1; min-width: 0; }
 .item-name {
   font-size: 15px;
@@ -217,43 +298,53 @@ main { padding: 12px 16px 16px; }
 }
 .item-meta { font-size: 12px; color: var(--text-soft); margin-top: 2px; }
 .item.low .item-meta { color: var(--warn); }
-.item.zero .item-meta { color: var(--danger); }
+.item.zero .item-meta { color: var(--danger); font-weight: 500; }
 
-.qty-controls { display: flex; align-items: center; gap: 6px; }
+.qty-controls { display: flex; align-items: center; gap: 4px; }
 .qty-btn {
-  width: 38px; height: 38px;
+  width: 40px; height: 40px;
   border-radius: 10px;
   border: 0.5px solid var(--border-strong);
   background: var(--bg-card);
-  font-size: 20px;
+  font-size: 22px;
   font-weight: 500;
   color: var(--text);
   display: flex; align-items: center; justify-content: center;
   padding: 0;
-  transition: transform 0.1s;
+  transition: transform 0.1s, background 0.1s;
+  line-height: 1;
 }
 .qty-btn:active { transform: scale(0.92); background: var(--bg-soft); }
+.qty-btn.dec {
+  background: var(--bg-soft);
+}
 .qty-display {
-  min-width: 26px;
+  min-width: 28px;
   text-align: center;
-  font-size: 17px;
-  font-weight: 600;
+  font-size: 18px;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
 
 .badge {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
   font-size: 10px;
-  padding: 2px 6px;
-  border-radius: 4px;
+  padding: 2px 7px;
+  border-radius: 999px;
   margin-left: 6px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
+  line-height: 1.6;
   vertical-align: middle;
 }
 .badge.warn { background: var(--warn); color: white; }
 .badge.danger { background: var(--danger); color: white; }
+@media (prefers-color-scheme: dark) {
+  .badge.warn { background: var(--warn); color: #1c1917; }
+  .badge.danger { background: var(--danger); color: #1c1917; }
+}
 
 /* Buttons */
 .btn-primary {
@@ -279,9 +370,31 @@ main { padding: 12px 16px 16px; }
   font-weight: 500;
   flex: 1;
 }
-.btn-danger { color: var(--danger); border-color: var(--danger-border); }
 .action-row { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
 .action-row .btn-primary { flex: 1; }
+
+/* Shopping progress */
+.shop-progress {
+  background: var(--bg-card);
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  margin-bottom: 12px;
+}
+.shop-progress-text { font-size: 13px; color: var(--text-soft); margin-bottom: 8px; }
+.shop-progress-text strong { color: var(--text); font-weight: 700; font-size: 15px; }
+.shop-progress-bar {
+  height: 4px;
+  background: var(--bg-soft);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.shop-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 999px;
+  transition: width 0.3s;
+}
 
 /* Form */
 .form-card {
@@ -320,12 +433,15 @@ main { padding: 12px 16px 16px; }
 }
 .shop-item.bought .shop-name { text-decoration: line-through; }
 .shop-check {
-  width: 26px; height: 26px;
+  width: 28px; height: 28px;
   border-radius: 8px;
   border: 1.5px solid var(--border-strong);
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0;
   color: var(--accent-text);
+  font-weight: 700;
+  font-size: 16px;
+  line-height: 1;
 }
 .shop-check.checked { background: var(--accent); border-color: var(--accent); }
 .shop-info { flex: 1; min-width: 0; }
@@ -366,9 +482,10 @@ main { padding: 12px 16px 16px; }
   font-size: 13px;
   color: var(--text-soft);
   white-space: pre-wrap;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
 }
 
-/* Manage list (compact rows) */
+/* Manage list */
 .manage-row {
   display: grid;
   grid-template-columns: 1fr auto auto auto;
@@ -380,16 +497,19 @@ main { padding: 12px 16px 16px; }
   border-radius: var(--radius-sm);
   margin-bottom: 4px;
 }
-.manage-row input { padding: 6px 8px; background: var(--bg-soft); border: 0.5px solid var(--border); border-radius: 6px; font-size: 13px; }
-.manage-row .num-input { width: 50px; text-align: center; font-variant-numeric: tabular-nums; }
-.manage-row .delete-btn { width: 32px; height: 32px; border-radius: 8px; border: 0.5px solid var(--border); background: var(--bg-card); color: var(--danger); padding: 0; }
+.manage-row input { padding: 8px; background: var(--bg-soft); border: 0.5px solid var(--border); border-radius: 6px; font-size: 14px; }
+.manage-row .num-input { width: 52px; text-align: center; font-variant-numeric: tabular-nums; }
+.manage-row .delete-btn { width: 34px; height: 34px; border-radius: 8px; border: 0.5px solid var(--border); background: var(--bg-card); color: var(--danger); padding: 0; font-size: 16px; line-height: 1; }
+.manage-hint { font-size: 11px; color: var(--text-dim); margin-top: 12px; text-align: center; padding: 0 16px; }
 
+/* Dialog */
 .dialog-bg {
   position: fixed; inset: 0;
   background: rgba(0,0,0,0.4);
   display: flex; align-items: center; justify-content: center;
   z-index: 100;
   padding: 16px;
+  animation: fadeIn 0.15s;
 }
 .dialog {
   background: var(--bg-card);
@@ -397,13 +517,17 @@ main { padding: 12px 16px 16px; }
   padding: 20px;
   max-width: 380px;
   width: 100%;
+  animation: dialogIn 0.18s;
 }
-.dialog h3 { margin: 0 0 8px; font-size: 17px; }
+@keyframes dialogIn { from { opacity: 0; transform: scale(0.96); } }
+.dialog h3 { margin: 0 0 8px; font-size: 17px; font-weight: 600; }
 .dialog p { margin: 0 0 16px; color: var(--text-soft); font-size: 14px; }
 .dialog-actions { display: flex; gap: 8px; }
-.dialog-actions button { flex: 1; padding: 12px; border-radius: var(--radius); border: 0.5px solid var(--border-strong); background: var(--bg-card); font-size: 14px; font-weight: 600; }
+.dialog-actions button { flex: 1; padding: 12px; border-radius: var(--radius); border: 0.5px solid var(--border-strong); background: var(--bg-card); font-size: 14px; font-weight: 600; color: var(--text); }
 .dialog-actions .confirm { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.dialog-actions .confirm.danger { background: var(--danger); border-color: var(--danger); color: white; }
 
+/* Toast */
 .toast {
   position: fixed;
   bottom: calc(80px + var(--safe-bottom));
@@ -431,11 +555,13 @@ main { padding: 12px 16px 16px; }
     <h1 class="app-title">Despensa</h1>
     <div class="app-subtitle" id="head-subtitle">Inventario de casa</div>
   </div>
-  <button class="qty-btn" id="settings-btn" title="Ajustes" style="width:36px;height:36px;font-size:18px;">⚙</button>
+  <button class="head-btn" id="settings-btn" title="Ajustes" aria-label="Ajustes">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+  </button>
 </header>
 
 <main>
-  <!-- Tab: Home / Inventario -->
+  <!-- Tab: Inventario -->
   <section class="panel active" id="panel-home">
     <div class="metrics-row">
       <div class="metric primary">
@@ -463,6 +589,12 @@ main { padding: 12px 16px 16px; }
 
   <!-- Tab: Lista de la compra -->
   <section class="panel" id="panel-shop">
+    <div id="shop-progress-wrap" style="display:none;">
+      <div class="shop-progress">
+        <div class="shop-progress-text"><strong id="shop-checked">0</strong> de <strong id="shop-total">0</strong> marcados</div>
+        <div class="shop-progress-bar"><div class="shop-progress-fill" id="shop-fill" style="width:0%"></div></div>
+      </div>
+    </div>
     <div class="action-row">
       <button class="btn-primary" id="btn-whatsapp">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
@@ -472,9 +604,7 @@ main { padding: 12px 16px 16px; }
     </div>
     <div id="shop-list"></div>
     <div id="shop-confirm-wrap" style="margin-top: 16px; display:none;">
-      <button class="btn-primary" id="btn-confirm-shop">
-        Confirmar compra y actualizar stock
-      </button>
+      <button class="btn-primary" id="btn-confirm-shop">Confirmar compra y actualizar stock</button>
     </div>
   </section>
 
@@ -518,27 +648,29 @@ main { padding: 12px 16px 16px; }
 
     <div class="section-title">Productos existentes</div>
     <div id="manage-list"></div>
+    <div class="manage-hint">Mantén pulsada una fila para editar ubicación y zona</div>
   </section>
 </main>
 
 <nav class="tabs">
-  <button class="tab-btn active" data-tab="home">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
-    <span>Inventario</span>
-  </button>
-  <button class="tab-btn" data-tab="shop">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.7 13.4a2 2 0 0 0 2 1.6h9.7a2 2 0 0 0 2-1.6L23 6H6"/></svg>
-    <span>Compra</span>
-    <span id="shop-badge" style="display:none; position:absolute; top:6px; right:calc(50% - 22px); background:var(--danger); color:white; border-radius:999px; font-size:10px; padding:1px 5px; font-weight:700;">0</span>
-  </button>
-  <button class="tab-btn" data-tab="history">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-    <span>Histórico</span>
-  </button>
-  <button class="tab-btn" data-tab="manage">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-    <span>Gestionar</span>
-  </button>
+  <div class="tabs-inner">
+    <button class="tab-btn active" data-tab="home">
+      <span class="tab-icon-wrap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></span>
+      <span class="label">Inventario</span>
+    </button>
+    <button class="tab-btn" data-tab="shop">
+      <span class="tab-icon-wrap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.7 13.4a2 2 0 0 0 2 1.6h9.7a2 2 0 0 0 2-1.6L23 6H6"/></svg><span class="tab-badge" id="shop-badge" style="display:none;">0</span></span>
+      <span class="label">Compra</span>
+    </button>
+    <button class="tab-btn" data-tab="history">
+      <span class="tab-icon-wrap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span>
+      <span class="label">Histórico</span>
+    </button>
+    <button class="tab-btn" data-tab="manage">
+      <span class="tab-icon-wrap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></span>
+      <span class="label">Gestionar</span>
+    </button>
+  </div>
 </nav>
 
 <script src="app.js"></script>

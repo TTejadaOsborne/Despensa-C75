@@ -208,7 +208,7 @@ function renderItem(p) {
       <div class="item-meta">Stock ${p.stock} · mín ${p.min} · ${escapeHtml(p.zone || '')}</div>
     </div>
     <div class="qty-controls">
-      <button class="qty-btn" data-act="dec">−</button>
+      <button class="qty-btn dec" data-act="dec">−</button>
       <span class="qty-display">${p.stock}</span>
       <button class="qty-btn" data-act="inc">+</button>
     </div>`;
@@ -230,14 +230,24 @@ function renderShop() {
   const needed = data.filter(p => p.stock <= p.min);
   const list = document.getElementById('shop-list');
   const confirmWrap = document.getElementById('shop-confirm-wrap');
+  const progWrap = document.getElementById('shop-progress-wrap');
   list.innerHTML = '';
 
   if (needed.length === 0) {
     list.innerHTML = `<div class="empty"><div class="empty-icon">🎉</div>Todo por encima del mínimo<br><span style="font-size:12px;">No hay nada que comprar</span></div>`;
     confirmWrap.style.display = 'none';
+    progWrap.style.display = 'none';
     return;
   }
   confirmWrap.style.display = 'block';
+
+  // Progress: count checked vs total
+  const checkedCount = needed.filter(p => shopState[p.id]).length;
+  progWrap.style.display = checkedCount > 0 ? 'block' : 'none';
+  document.getElementById('shop-checked').textContent = checkedCount;
+  document.getElementById('shop-total').textContent = needed.length;
+  const pct = needed.length ? Math.round((checkedCount / needed.length) * 100) : 0;
+  document.getElementById('shop-fill').style.width = pct + '%';
 
   // Group by Mercadona zone, in shopping order
   const grouped = {};
@@ -433,11 +443,6 @@ function renderManage() {
     row.addEventListener('touchmove', () => { if (pressTimer) clearTimeout(pressTimer); });
     list.appendChild(row);
   });
-  // Hint
-  const hint = document.createElement('div');
-  hint.style.cssText = 'font-size:11px;color:var(--text-dim);margin-top:8px;text-align:center;';
-  hint.textContent = 'Mantén pulsado un producto para editar ubicación y zona';
-  list.appendChild(hint);
 }
 
 function editFull(p) {
@@ -630,7 +635,7 @@ function showDialog({ title, msg, confirmText = 'Confirmar', danger = false, onC
       <p>${escapeHtml(msg)}</p>
       <div class="dialog-actions">
         <button id="dlg-cancel">Cancelar</button>
-        <button class="confirm" id="dlg-ok" ${danger ? 'style="background:var(--danger);border-color:var(--danger);color:white;"' : ''}>${escapeHtml(confirmText)}</button>
+        <button class="confirm ${danger ? 'danger' : ''}" id="dlg-ok">${escapeHtml(confirmText)}</button>
       </div>
     </div>`;
   document.body.appendChild(dlg);
