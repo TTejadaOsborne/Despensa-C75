@@ -9,50 +9,88 @@ const SHOP_STATE_KEY = 'despensa_shop_state_v2';
 // Ubicaciones en casa
 const LOCATIONS = ['Nevera', 'Despensa', 'Congelador', 'Otros'];
 
-// Zonas de Mercadona Las Tablas — orden personalizable después con plano real.
-// Por ahora, orden general aproximado al recorrido típico de un Mercadona estándar.
+// Zonas Mercadona Las Tablas — extraídas del plano real de la tienda.
+// Orden = recorrido real: entrada por Cajas (sur), giro a la derecha,
+// subida por la columna derecha, U por el techo de la tienda hasta arriba-izquierda,
+// bajada por la izquierda, cruce horizontal por abajo hasta Frutas y verduras,
+// fin en Cajas.
 const MERCADONA_ZONES = [
-  'Frutas y verduras',
-  'Carnicería y pescadería',
-  'Charcutería y quesos',
-  'Panadería',
-  'Lácteos y huevos',
-  'Desayuno y dulces',
-  'Pasta, arroz y legumbres',
-  'Conservas',
-  'Aceites y salsas',
-  'Despensa',
-  'Bebidas',
+  'Comida preparada (caliente)',
+  'Comida preparada (nevera)',
+  'Bebidas alcohólicas',
+  'Pescadería',
+  'Pescado envasado nevera',
+  'Bebidas y refrescos',
   'Congelados',
-  'Higiene y droguería',
-  'Limpieza',
+  'Helados y chocolates',
+  'Patatas fritas',
+  'Verduras y frutas congeladas',
+  'Pavo y pollo',
+  'Pasta y aceites',
+  'Huevos y legumbres',
+  'Ternera y cerdo',
+  'Leche',
+  'Yogures y postres',
+  'Pan/Picos y desayuno/dulces',
+  'Panadería',
+  'Utensilios de plástico',
+  'Café, chocolate y chuches',
+  'Zumos',
+  'Limpieza hogar',
+  'Zona baño y cuidado personal',
+  'Quesos',
+  'Cortador jamón',
+  'Embutido aperitivo',
+  'Embutido envasado',
+  'Frutos secos',
+  'Frutas y verduras',
   'Otros',
 ];
 
+// Mapeo de categorías antiguas (versión anterior de la app) → zonas nuevas.
+// Solo se aplica al cargar datos antiguos, para que no se queden huérfanos.
+const LEGACY_ZONE_MAP = {
+  'Frutas y verduras': 'Frutas y verduras',
+  'Carnicería y pescadería': 'Pavo y pollo',
+  'Lácteos y huevos': 'Leche',
+  'Charcutería y quesos': 'Quesos',
+  'Panadería': 'Panadería',
+  'Despensa': 'Pasta y aceites',
+  'Conservas': 'Pasta y aceites',
+  'Pasta, arroz y legumbres': 'Pasta y aceites',
+  'Desayuno y dulces': 'Pan/Picos y desayuno/dulces',
+  'Aceites y salsas': 'Pasta y aceites',
+  'Bebidas': 'Bebidas y refrescos',
+  'Congelados': 'Congelados',
+  'Higiene y droguería': 'Zona baño y cuidado personal',
+  'Limpieza': 'Limpieza hogar',
+  'Otros': 'Otros',
+};
+
 const SEED = [
-  { name: 'Leche entera 1L',        stock: 3, min: 2, location: 'Nevera',    zone: 'Lácteos y huevos' },
-  { name: 'Huevos (docena)',        stock: 1, min: 1, location: 'Nevera',    zone: 'Lácteos y huevos' },
-  { name: 'Yogur natural',          stock: 6, min: 4, location: 'Nevera',    zone: 'Lácteos y huevos' },
-  { name: 'Queso fresco',           stock: 2, min: 1, location: 'Nevera',    zone: 'Charcutería y quesos' },
-  { name: 'Pan de molde',           stock: 1, min: 1, location: 'Despensa',  zone: 'Panadería' },
+  { name: 'Leche entera 1L',        stock: 3, min: 2, location: 'Nevera',    zone: 'Leche' },
+  { name: 'Huevos (docena)',        stock: 1, min: 1, location: 'Nevera',    zone: 'Huevos y legumbres' },
+  { name: 'Yogur natural',          stock: 6, min: 4, location: 'Nevera',    zone: 'Yogures y postres' },
+  { name: 'Queso fresco',           stock: 2, min: 1, location: 'Nevera',    zone: 'Quesos' },
+  { name: 'Pan de molde',           stock: 1, min: 1, location: 'Despensa',  zone: 'Pan/Picos y desayuno/dulces' },
   { name: 'Plátanos',               stock: 5, min: 3, location: 'Despensa',  zone: 'Frutas y verduras' },
   { name: 'Tomates',                stock: 4, min: 3, location: 'Nevera',    zone: 'Frutas y verduras' },
   { name: 'Manzanas',               stock: 6, min: 4, location: 'Nevera',    zone: 'Frutas y verduras' },
-  { name: 'Pechuga de pollo',       stock: 2, min: 2, location: 'Nevera',    zone: 'Carnicería y pescadería' },
-  { name: 'Salmón fresco',          stock: 1, min: 1, location: 'Nevera',    zone: 'Carnicería y pescadería' },
-  { name: 'Arroz',                  stock: 2, min: 1, location: 'Despensa',  zone: 'Pasta, arroz y legumbres' },
-  { name: 'Pasta',                  stock: 3, min: 2, location: 'Despensa',  zone: 'Pasta, arroz y legumbres' },
-  { name: 'Lentejas',               stock: 2, min: 1, location: 'Despensa',  zone: 'Pasta, arroz y legumbres' },
-  { name: 'Aceite de oliva',        stock: 1, min: 1, location: 'Despensa',  zone: 'Aceites y salsas' },
-  { name: 'Vinagre',                stock: 1, min: 1, location: 'Despensa',  zone: 'Aceites y salsas' },
-  { name: 'Agua 1.5L (pack)',       stock: 2, min: 2, location: 'Despensa',  zone: 'Bebidas' },
-  { name: 'Café molido',            stock: 1, min: 1, location: 'Despensa',  zone: 'Desayuno y dulces' },
-  { name: 'Cereales',               stock: 2, min: 1, location: 'Despensa',  zone: 'Desayuno y dulces' },
-  { name: 'Atún en lata',           stock: 6, min: 4, location: 'Despensa',  zone: 'Conservas' },
-  { name: 'Verduras congeladas',    stock: 2, min: 1, location: 'Congelador', zone: 'Congelados' },
+  { name: 'Pechuga de pollo',       stock: 2, min: 2, location: 'Nevera',    zone: 'Pavo y pollo' },
+  { name: 'Salmón fresco',          stock: 1, min: 1, location: 'Nevera',    zone: 'Pescadería' },
+  { name: 'Arroz',                  stock: 2, min: 1, location: 'Despensa',  zone: 'Pasta y aceites' },
+  { name: 'Pasta',                  stock: 3, min: 2, location: 'Despensa',  zone: 'Pasta y aceites' },
+  { name: 'Lentejas',               stock: 2, min: 1, location: 'Despensa',  zone: 'Huevos y legumbres' },
+  { name: 'Aceite de oliva',        stock: 1, min: 1, location: 'Despensa',  zone: 'Pasta y aceites' },
+  { name: 'Vinagre',                stock: 1, min: 1, location: 'Despensa',  zone: 'Pasta y aceites' },
+  { name: 'Agua 1.5L (pack)',       stock: 2, min: 2, location: 'Despensa',  zone: 'Bebidas y refrescos' },
+  { name: 'Café molido',            stock: 1, min: 1, location: 'Despensa',  zone: 'Café, chocolate y chuches' },
+  { name: 'Cereales',               stock: 2, min: 1, location: 'Despensa',  zone: 'Pan/Picos y desayuno/dulces' },
+  { name: 'Atún en lata',           stock: 6, min: 4, location: 'Despensa',  zone: 'Pasta y aceites' },
+  { name: 'Verduras congeladas',    stock: 2, min: 1, location: 'Congelador', zone: 'Verduras y frutas congeladas' },
   { name: 'Pizza congelada',        stock: 2, min: 1, location: 'Congelador', zone: 'Congelados' },
-  { name: 'Papel higiénico (pack)', stock: 1, min: 1, location: 'Otros',     zone: 'Higiene y droguería' },
-  { name: 'Detergente lavadora',    stock: 1, min: 1, location: 'Otros',     zone: 'Limpieza' },
+  { name: 'Papel higiénico (pack)', stock: 1, min: 1, location: 'Otros',     zone: 'Zona baño y cuidado personal' },
+  { name: 'Detergente lavadora',    stock: 1, min: 1, location: 'Otros',     zone: 'Limpieza hogar' },
 ];
 
 // ---------- State ----------
@@ -66,7 +104,26 @@ let locFilter = 'all'; // all | Nevera | Despensa | Congelador | Otros
 function loadData() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      // Migración automática: si algún producto tiene una zona del esquema anterior,
+      // la traducimos al nuevo esquema sin perder datos.
+      let migrated = false;
+      parsed.forEach(p => {
+        if (p.zone && !MERCADONA_ZONES.includes(p.zone) && LEGACY_ZONE_MAP[p.zone]) {
+          p.zone = LEGACY_ZONE_MAP[p.zone];
+          migrated = true;
+        } else if (p.zone && !MERCADONA_ZONES.includes(p.zone)) {
+          // Zona desconocida que no está en el mapa de legado: fallback a Otros
+          p.zone = 'Otros';
+          migrated = true;
+        }
+      });
+      if (migrated) {
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed)); } catch (e) {}
+      }
+      return parsed;
+    }
   } catch (e) {}
   const seed = SEED.map((p, i) => ({ id: 'p' + (i + 1), ...p }));
   saveData(seed);
