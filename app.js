@@ -728,7 +728,25 @@ function renderAll() {
 // ---------- Service worker registration ----------
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('service-worker.js').catch(() => {});
+    navigator.serviceWorker.register('service-worker.js').then(reg => {
+      // Forzar comprobación de actualización cada vez que la app cobra el foco.
+      // Si hay versión nueva en el server, el SW se actualiza automáticamente.
+      reg.update().catch(() => {});
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          reg.update().catch(() => {});
+        }
+      });
+    }).catch(() => {});
+
+    // Si el SW activo cambia (nueva versión tomó el control), recargar para
+    // que el usuario vea la versión nueva inmediatamente.
+    let refreshing = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (refreshing) return;
+      refreshing = true;
+      window.location.reload();
+    });
   });
 }
 
