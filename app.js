@@ -64,6 +64,7 @@ $$(".tab-btn").forEach(btn => {
 function switchView(name) {
   $$(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.view === name));
   $$(".view").forEach(v => v.classList.toggle("active", v.id === "view-" + name));
+  $("#fabAdd").style.display = name === "inventario" ? "flex" : "none";
 }
 
 // ---------- Fechas ----------
@@ -336,6 +337,7 @@ function renderMenu() {
         <div class="meal-actions">
           <button class="btn btn-secondary" data-act="edit-meal" data-slot="${slot.id}">${name ? "Cambiar" : "Planificar"}</button>
           ${name ? `<button class="btn btn-secondary" data-act="clear-meal" data-slot="${slot.id}">Quitar</button>` : ""}
+          <a href="https://maraolmoss.com/recetas/?comida=${slot.id}" target="_blank" rel="noopener" class="btn btn-secondary" style="text-decoration:none;">🔗 Inspiración</a>
         </div>
       </div>`;
   });
