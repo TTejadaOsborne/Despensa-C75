@@ -247,7 +247,7 @@ function renderMenu() {
 
   const dateStr = dateStrFor(selectedDayOffset);
   const dayData = menuByDate[dateStr] || {};
-  let html = `<div class="section-head" style="margin-top:2px;"><span></span><button class="mini-link" id="btnManageRecipes">Gestionar recetas</button></div>`;
+  let html = `<div class="section-head" style="margin-top:2px;"><button class="mini-link" id="btnSuggest">💡 Qué puedo cocinar</button><button class="mini-link" id="btnManageRecipes">Gestionar recetas</button></div>`;
   MEAL_SLOTS.forEach(slot => {
     const meal = dayData[slot.id];
     const name = meal ? (meal.recipeName || meal.freeText) : null;
@@ -266,6 +266,7 @@ function renderMenu() {
   $("#menuBody").innerHTML = html;
 
   $("#btnManageRecipes")?.addEventListener("click", openRecipesSheet);
+  $("#btnSuggest")?.addEventListener("click", openSuggestionsSheet);
   $$('[data-act="edit-meal"]').forEach(b => b.addEventListener("click", () => openMealSheet(dateStr, b.dataset.slot)));
   $$('[data-act="clear-meal"]').forEach(b => b.addEventListener("click", () => clearMealSlot(dateStr, b.dataset.slot)));
 }
@@ -413,6 +414,73 @@ function openRecipeEditor(recipe) {
     });
   };
   render();
+}
+
+// ---------- Sugerencias: qué puedo cocinar con lo que tengo ----------
+function computeRecipeMatches() {
+  const withIng = recipes.filter(r => (r.ingredients || []).length > 0);
+  const scored = withIng.map(r => {
+    const total = r.ingredients.length;
+    const have = r.ingredients.filter(ing => {
+      const p = products.find(x => x.id === ing.productId);
+      return p && p.stock > 0;
+    });
+    const missing = r.ingredients.filter(ing => {
+      const p = products.find(x => x.id === ing.productId);
+      return !(p && p.stock > 0);
+    }).map(ing => ing.name);
+    return { recipe: r, haveCount: have.length, total, missing, pct: have.length / total };
+  });
+  scored.sort((a, b) => b.pct - a.pct || b.total - a.total);
+  return { scored, withoutIngredients: recipes.length - withIng.length };
+}
+
+function openSuggestionsSheet() {
+  const { scored, withoutIngredients } = computeRecipeMatches();
+  const dayLabel = labelFor(selectedDayOffset).dname;
+  const dateStr = dateStrFor(selectedDayOffset);
+
+  const rows = scored.map(s => {
+    const full = s.pct === 1;
+    const badgeColor = full ? "var(--primary)" : s.pct > 0 ? "var(--accent)" : "var(--text-soft)";
+    return `
+      <div class="product-row" style="align-items:flex-start;">
+        <div class="product-info">
+          <div class="product-name">${escapeHtml(s.recipe.name)}</div>
+          <div class="product-meta" style="margin-bottom:4px;">
+            <span class="chip" style="background:${badgeColor};color:white;">${s.haveCount}/${s.total} en casa</span>
+          </div>
+          ${s.missing.length ? `<div style="font-size:12px;color:var(--text-soft);">Falta: ${s.missing.map(escapeHtml).join(", ")}</div>` : ""}
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <button class="btn btn-secondary" data-act="sug-slot" data-rid="${s.recipe.id}" data-slot="comida" style="padding:8px 10px;font-size:12.5px;">Comida</button>
+          <button class="btn btn-secondary" data-act="sug-slot" data-rid="${s.recipe.id}" data-slot="cena" style="padding:8px 10px;font-size:12.5px;">Cena</button>
+        </div>
+      </div>`;
+  }).join("");
+
+  const html = `
+    <div class="overlay" id="ovS">
+      <div class="sheet">
+        <h3>Qué puedo cocinar — ${escapeHtml(dayLabel)}</h3>
+        ${scored.length === 0
+          ? emptyState("💡", "Sin recetas evaluables", "Vincula ingredientes a tus recetas desde \"Gestionar recetas\" para que pueda calcular qué podéis cocinar con lo que tenéis.")
+          : `<div style="font-size:12.5px;color:var(--text-soft);margin-bottom:10px;">Ordenadas de más a menos aprovechamiento de tu despensa actual.</div>${rows}`}
+        ${withoutIngredients > 0 ? `<div style="font-size:11.5px;color:var(--text-soft);margin-top:6px;">${withoutIngredients} receta(s) sin ingredientes vinculados no se muestran aquí.</div>` : ""}
+        <div class="sheet-actions" style="margin-top:14px;">
+          <button class="btn btn-secondary btn-block" id="s-close">Cerrar</button>
+        </div>
+      </div>
+    </div>`;
+  $("#modalRoot").innerHTML = html;
+  $("#s-close").addEventListener("click", closeSheet);
+  $("#ovS").addEventListener("click", e => { if (e.target.id === "ovS") closeSheet(); });
+  $$('[data-act="sug-slot"]').forEach(b => b.addEventListener("click", () => {
+    const r = recipes.find(x => x.id === b.dataset.rid);
+    if (!r) return;
+    setMealSlot(dateStr, b.dataset.slot, { recipeId: r.id, recipeName: r.name });
+    closeSheet();
+  }));
 }
 
 // ==================================================================
@@ -622,6 +690,122 @@ function openScanTicketSheet() {
 }
 
 // ==================================================================
+// EXPORTAR TICKET COMO ARCHIVO ÚNICO (imagen con fecha, foto y detalle)
+// ==================================================================
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
+}
+
+async function buildTicketCardBlob(entry) {
+  const width = 720;
+  const pad = 36;
+  const d = entry.createdAt?.toDate ? entry.createdAt.toDate() : new Date();
+  const dateLabel = d.toLocaleDateString("es-ES", { day: "numeric", month: "long", year: "numeric" });
+  const items = entry.items || [];
+
+  let photoImg = null;
+  let photoH = 0;
+  if (entry.photo) {
+    try {
+      photoImg = await loadImage(entry.photo);
+      const maxW = width - pad * 2;
+      photoH = Math.min(420, photoImg.height * (maxW / photoImg.width));
+    } catch (e) {}
+  }
+
+  const rowH = 34;
+  const headerH = 118;
+  const total = items.reduce((s, it) => s + (parseFloat((it.price || "0").replace(",", ".")) || 0), 0);
+  const height = headerH + (photoImg ? photoH + 24 : 0) + items.length * rowH + 90 + pad;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width; canvas.height = height;
+  const ctx = canvas.getContext("2d");
+
+  // Fondo
+  ctx.fillStyle = "#FBFAF6";
+  ctx.fillRect(0, 0, width, height);
+
+  // Cabecera
+  ctx.fillStyle = "#2F5233";
+  ctx.fillRect(0, 0, width, headerH);
+  ctx.fillStyle = "#FFFFFF";
+  ctx.font = "600 26px Georgia, serif";
+  ctx.fillText("Despensa — Ticket", pad, 48);
+  ctx.font = "400 15px sans-serif";
+  ctx.fillStyle = "#E7EEE3";
+  ctx.fillText(dateLabel, pad, 78);
+  ctx.fillStyle = "#E8A33D";
+  ctx.font = "600 15px sans-serif";
+  ctx.fillText(`${items.length} producto(s)`, pad, 102);
+
+  let y = headerH + 20;
+
+  if (photoImg) {
+    const maxW = width - pad * 2;
+    ctx.drawImage(photoImg, pad, y, maxW, photoH);
+    y += photoH + 24;
+  }
+
+  ctx.font = "400 16px sans-serif";
+  items.forEach(it => {
+    ctx.fillStyle = "#23241F";
+    ctx.fillText(it.name, pad, y + 22);
+    if (it.price) {
+      ctx.textAlign = "right";
+      ctx.fillText(it.price + " €", width - pad, y + 22);
+      ctx.textAlign = "left";
+    }
+    ctx.strokeStyle = "#E4DFD3";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(pad, y + 32);
+    ctx.lineTo(width - pad, y + 32);
+    ctx.stroke();
+    y += rowH;
+  });
+
+  if (total > 0) {
+    y += 14;
+    ctx.font = "700 19px sans-serif";
+    ctx.fillStyle = "#2F5233";
+    ctx.fillText("Total", pad, y + 22);
+    ctx.textAlign = "right";
+    ctx.fillText(total.toFixed(2).replace(".", ",") + " €", width - pad, y + 22);
+    ctx.textAlign = "left";
+  }
+
+  ctx.font = "400 12px sans-serif";
+  ctx.fillStyle = "#A6A296";
+  ctx.fillText("Guardado desde Despensa", pad, height - 16);
+
+  return new Promise(resolve => canvas.toBlob(resolve, "image/jpeg", 0.9));
+}
+
+async function exportTicket(entry) {
+  const d = entry.createdAt?.toDate ? entry.createdAt.toDate() : new Date();
+  const fileDate = d.toISOString().slice(0, 10);
+  const filename = `ticket-despensa-${fileDate}.jpg`;
+  const blob = await buildTicketCardBlob(entry);
+  const file = new File([blob], filename, { type: "image/jpeg" });
+
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: filename });
+      return;
+    } catch (e) { /* usuario canceló, seguimos con la alternativa */ }
+  }
+  // Alternativa: abrir en pestaña nueva para guardar manualmente (mantener pulsado → guardar imagen)
+  const url = URL.createObjectURL(blob);
+  window.open(url, "_blank");
+}
+
+// ==================================================================
 // RENDER: HISTORIAL
 // ==================================================================
 function renderHistorial() {
@@ -642,7 +826,10 @@ function renderHistorial() {
       <div class="hist-entry" data-id="${h.id}">
         <div class="hist-head">
           <span class="hist-date">${isTicket ? "🧾 " : ""}${dateLabel}</span>
-          <span class="hist-count">${(h.items||[]).length} producto(s)</span>
+          <span style="display:flex;align-items:center;gap:8px;">
+            <span class="hist-count">${(h.items||[]).length} producto(s)</span>
+            ${isTicket ? `<button class="mini-link" data-act="export-ticket" data-id="${h.id}">Guardar</button>` : ""}
+          </span>
         </div>
         <div class="hist-body">
           ${h.photo ? `<img src="${h.photo}" style="width:100%;border-radius:10px;margin-bottom:8px;">` : ""}
@@ -652,6 +839,15 @@ function renderHistorial() {
   }).join("");
 }
 $("#histList").addEventListener("click", e => {
+  const exportBtn = e.target.closest('[data-act="export-ticket"]');
+  if (exportBtn) {
+    e.stopPropagation();
+    const entry = history.find(h => h.id === exportBtn.dataset.id);
+    if (!entry) return;
+    exportBtn.textContent = "Generando…";
+    exportTicket(entry).finally(() => { exportBtn.textContent = "Guardar"; });
+    return;
+  }
   const head = e.target.closest(".hist-head");
   if (!head) return;
   head.nextElementSibling.classList.toggle("open");
