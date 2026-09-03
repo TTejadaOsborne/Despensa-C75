@@ -1,5 +1,5 @@
 import {
-  ZONES, LOCATIONS, MEAL_SLOTS,
+  ZONES, LOCATIONS, MEAL_SLOTS, UNITS, UNIT_MAP,
   listenProducts, addProduct, updateProduct, deleteProduct,
   listenRecipes, addRecipe, updateRecipe, deleteRecipe,
   listenMenu, setMealSlot, clearMealSlot,
@@ -24,6 +24,10 @@ const escapeHtml = s => (s || "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&
 // Un producto entra en "por comprar" solo si está bajo mínimo Y tiene activo el seguimiento de compra.
 // trackShopping !== false trata a los productos antiguos (sin este campo aún) como activados, por compatibilidad.
 const needsRestock = p => p.stock <= p.min && p.trackShopping !== false;
+const unitOf = p => UNIT_MAP[p.unit] || UNIT_MAP.ud;
+const fmtNum = n => { const r = Math.round((n + Number.EPSILON) * 100) / 100; return Number.isInteger(r) ? String(r) : String(r); };
+const fmtQty = p => { const u = unitOf(p); const n = fmtNum(p.stock); return u.id === "ud" ? n : `${n} ${u.short}`; };
+const fmtMin = p => { const u = unitOf(p); const n = fmtNum(p.min); return u.id === "ud" ? `mín. ${n}` : `mín. ${n} ${u.short}`; };
 
 // ---------- Estado de compra compartido (doc único en Firestore) ----------
 const shoppingDocRef = doc(db, "state", "shopping");
@@ -140,13 +144,14 @@ function renderInventario() {
             <div class="product-meta">
               <span class="chip">${escapeHtml(p.location)}</span>
               ${p.needsDefrost ? `<span class="chip frost">❄️ ${p.defrostHours}h antes</span>` : ""}
-              ${p.trackShopping === false ? `<span class="chip" style="background:#EDEAE0;color:var(--text-soft);">sin seguimiento</span>` : `<span>mín. ${p.min}</span>`}
+              ${p.trackShopping === false ? `<span class="chip" style="background:#EDEAE0;color:var(--text-soft);">sin seguimiento</span>` : `<span>${fmtMin(p)}</span>`}
             </div>
+            ${p.note ? `<div style="font-size:11.5px;color:var(--text-soft);font-style:italic;margin-top:2px;">${escapeHtml(p.note)}</div>` : ""}
           </div>
           ${selectMode ? "" : `
           <div class="stepper">
             <button data-act="dec" data-id="${p.id}">−</button>
-            <span class="val">${p.stock}</span>
+            <span class="val">${fmtQty(p)}</span>
             <button data-act="inc" data-id="${p.id}">+</button>
           </div>`}
         </div>`;
@@ -186,7 +191,9 @@ $("#invList").addEventListener("click", e => {
   if (btn) {
     const p = products.find(x => x.id === btn.dataset.id);
     if (!p) return;
-    const next = btn.dataset.act === "inc" ? p.stock + 1 : Math.max(0, p.stock - 1);
+    const step = unitOf(p).step;
+    const raw = btn.dataset.act === "inc" ? p.stock + step : Math.max(0, p.stock - step);
+    const next = Math.round((raw + Number.EPSILON) * 100) / 100;
     updateProduct(p.id, { stock: next });
     return;
   }
@@ -207,7 +214,7 @@ $("#fabAdd").addEventListener("click", () => openProductSheet(null));
 
 function openProductSheet(product) {
   const editing = !!product;
-  const p = product || { name: "", zone: ZONES[0], location: "Despensa", stock: 1, min: 1, needsDefrost: false, defrostHours: 24, trackShopping: true };
+  const p = product || { name: "", zone: ZONES[0], location: "Despensa", stock: 1, min: 1, unit: "ud", note: "", needsDefrost: false, defrostHours: 24, trackShopping: true };
   const html = `
     <div class="overlay" id="ov">
       <div class="sheet">
@@ -221,9 +228,15 @@ function openProductSheet(product) {
             <select id="f-zone">${ZONES.map(z => `<option ${z===p.zone?"selected":""}>${escapeHtml(z)}</option>`).join("")}</select>
           </div>
         </div>
+        <div class="field"><label>Unidad de medida</label>
+          <select id="f-unit">${UNITS.map(u => `<option value="${u.id}" ${(p.unit||"ud")===u.id?"selected":""}>${u.label}</option>`).join("")}</select>
+        </div>
         <div class="field-row">
-          <div class="field"><label>Stock actual</label><input type="number" id="f-stock" value="${p.stock}" min="0"></div>
-          <div class="field"><label>Mínimo (avisa al llegar aquí)</label><input type="number" id="f-min" value="${p.min}" min="0"></div>
+          <div class="field"><label>Stock actual</label><input type="number" id="f-stock" value="${p.stock}" min="0" step="any"></div>
+          <div class="field"><label>Mínimo (avisa al llegar aquí)</label><input type="number" id="f-min" value="${p.min}" min="0" step="any"></div>
+        </div>
+        <div class="field"><label>Nota (opcional) — ej. "cada bolsa lleva 4 filetes"</label>
+          <input type="text" id="f-note" value="${escapeHtml(p.note || "")}" placeholder="Contenido de cada unidad, si ayuda a recordarlo">
         </div>
         <div class="check-field"><input type="checkbox" id="f-track" ${p.trackShopping !== false ? "checked" : ""}><label for="f-track" style="margin:0;">Avisar y añadir a la lista de la compra cuando falte</label></div>
         <div class="check-field"><input type="checkbox" id="f-frost" ${p.needsDefrost?"checked":""}><label for="f-frost" style="margin:0;">Hay que sacarlo del congelador con antelación</label></div>
@@ -258,8 +271,10 @@ function openProductSheet(product) {
       name,
       location: $("#f-location").value,
       zone: $("#f-zone").value,
+      unit: $("#f-unit").value,
       stock: Number($("#f-stock").value) || 0,
       min: Number($("#f-min").value) || 0,
+      note: $("#f-note").value.trim(),
       needsDefrost: $("#f-frost").checked,
       defrostHours: Number($("#f-frost-hours").value) || 24,
       trackShopping: $("#f-track").checked
@@ -575,7 +590,7 @@ function renderCompra() {
           <div class="checkbox ${on?"on":""}" data-id="${p.id}">${on ? "✓" : ""}</div>
           <div class="product-info">
             <div class="product-name">${escapeHtml(p.name)}</div>
-            <div class="product-meta">tienes ${p.stock} · repón a ${p.min}</div>
+            <div class="product-meta">tienes ${fmtQty(p)} · repón a ${fmtNum(p.min)}${unitOf(p).id!=="ud" ? " "+unitOf(p).short : ""}</div>
           </div>
         </div>`;
     });
@@ -597,7 +612,7 @@ $("#btnConfirmPurchase").addEventListener("click", () => {
     return;
   }
   openConfirm("Confirmar compra", `Se repondrán ${needed.length} producto(s) a su cantidad mínima y se guardará en el historial.`, "Confirmar", () => {
-    const items = needed.map(p => ({ name: p.name, from: p.stock, to: p.min }));
+    const items = needed.map(p => ({ name: p.name, from: p.stock, to: p.min, unit: unitOf(p).id !== "ud" ? unitOf(p).short : "" }));
     needed.forEach(p => updateProduct(p.id, { stock: p.min }));
     addHistoryEntry({ items, type: "purchase" });
     clearShoppingCheckedFor(needed.map(p => p.id));
@@ -881,7 +896,7 @@ function renderHistorial() {
     const rows = (h.items || []).map(it =>
       isTicket
         ? `<div>${escapeHtml(it.name)}${it.price ? " — " + escapeHtml(it.price) + " €" : ""}</div>`
-        : `<div>${escapeHtml(it.name)} — ${it.from} → ${it.to}</div>`
+        : `<div>${escapeHtml(it.name)} — ${it.from} → ${it.to}${it.unit ? " " + escapeHtml(it.unit) : ""}</div>`
     ).join("");
     return `
       <div class="hist-entry" data-id="${h.id}">

@@ -24,6 +24,19 @@ export const ZONES = [
 
 export const LOCATIONS = ["Nevera", "Despensa", "Congelador", "Otros"];
 
+// Unidad de medida por producto, con el incremento (+/-) que tiene sentido para cada una
+export const UNITS = [
+  { id: "ud",      label: "unidades",     short: "ud",     step: 1 },
+  { id: "bolsa",   label: "bolsas",       short: "bolsas", step: 1 },
+  { id: "bote",    label: "botes/tarros", short: "botes",  step: 1 },
+  { id: "paquete", label: "paquetes",     short: "paq.",   step: 1 },
+  { id: "g",       label: "gramos (g)",   short: "g",      step: 100 },
+  { id: "kg",      label: "kilos (kg)",   short: "kg",     step: 0.5 },
+  { id: "ml",      label: "mililitros (ml)", short: "ml",  step: 100 },
+  { id: "l",       label: "litros (l)",   short: "l",      step: 0.5 }
+];
+export const UNIT_MAP = Object.fromEntries(UNITS.map(u => [u.id, u]));
+
 export const MEAL_SLOTS = [
   { id: "comida", label: "Comida" },
   { id: "cena", label: "Cena" }
@@ -51,6 +64,8 @@ export async function addProduct(p) {
     location: p.location || "Despensa",
     stock: Number(p.stock) || 0,
     min: Number(p.min) || 1,
+    unit: p.unit || "ud",
+    note: p.note || "",
     needsDefrost: !!p.needsDefrost,
     defrostHours: Number(p.defrostHours) || 24,
     trackShopping: p.trackShopping !== false,
