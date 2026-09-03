@@ -470,7 +470,7 @@ $("#btnConfirmPurchase").addEventListener("click", () => {
   openConfirm("Confirmar compra", `Se repondrán ${needed.length} producto(s) a su cantidad mínima y se guardará en el historial.`, "Confirmar", () => {
     const items = needed.map(p => ({ name: p.name, from: p.stock, to: p.min }));
     needed.forEach(p => updateProduct(p.id, { stock: p.min }));
-    addHistoryEntry(items);
+    addHistoryEntry({ items, type: "purchase" });
     clearShoppingCheckedFor(needed.map(p => p.id));
     closeSheet();
   });
@@ -491,6 +491,137 @@ $("#btnWhatsapp").addEventListener("click", () => {
 });
 
 // ==================================================================
+// ESCANEAR TICKET (foto + texto pegado desde Live Text del iPhone)
+// ==================================================================
+const TICKET_IGNORE = /total|subtotal|\biva\b|tarjeta|efectivo|cambio|fecha|hora|ticket|cif|operaci[oó]n|gracias|mercadona|n\.?\s?factura|autorizaci[oó]n|contactless|bizum|c[oó]digo|art[ií]culos|importe|descuento\s*total/i;
+
+function parseTicketText(text) {
+  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+  const priceRe = /(\d{1,3}(?:[.,]\d{2}))\s*€?\s*$/;
+  const items = [];
+  lines.forEach(line => {
+    if (TICKET_IGNORE.test(line)) return;
+    const m = line.match(priceRe);
+    if (!m) return;
+    const priceStr = m[1].replace(".", ",");
+    let name = line.slice(0, m.index).trim();
+    name = name.replace(/^\d+\s*(x|ud\.?|uds\.?)?\s*/i, "").trim();
+    if (name.length < 2) return;
+    items.push({ name, price: priceStr });
+  });
+  return items;
+}
+
+function compressImageFile(file, maxBytes = 650000) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onload = () => { img.src = reader.result; };
+    reader.onerror = reject;
+    img.onload = () => {
+      let width = img.width, height = img.height;
+      const maxDim = 1100;
+      if (width > maxDim || height > maxDim) {
+        const scale = maxDim / Math.max(width, height);
+        width = Math.round(width * scale);
+        height = Math.round(height * scale);
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = width; canvas.height = height;
+      canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+      let quality = 0.75;
+      let dataUrl = canvas.toDataURL("image/jpeg", quality);
+      while (dataUrl.length > maxBytes && quality > 0.25) {
+        quality -= 0.1;
+        dataUrl = canvas.toDataURL("image/jpeg", quality);
+      }
+      resolve(dataUrl);
+    };
+    img.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+$("#btnScanTicket").addEventListener("click", openScanTicketSheet);
+
+function openScanTicketSheet() {
+  let photoData = null;
+  let detected = [];
+
+  const render = () => {
+    const html = `
+      <div class="overlay" id="ovT">
+        <div class="sheet">
+          <h3>Escanear ticket</h3>
+          <div class="field">
+            <label>1. Foto del ticket (opcional, se guarda en el histórico)</label>
+            <input type="file" id="t-photo" accept="image/*" capture="environment">
+            ${photoData ? `<img src="${photoData}" style="width:100%;border-radius:10px;margin-top:8px;">` : ""}
+          </div>
+          <div class="field">
+            <label>2. Pega aquí el texto del ticket — ábrelo en Fotos, toca el icono Live Text (rayitas amarillas) → Seleccionar todo → Copiar</label>
+            <textarea id="t-text" placeholder="Pega el texto copiado del ticket…" style="min-height:100px;"></textarea>
+          </div>
+          <button class="btn btn-secondary btn-block" id="t-detect" style="margin-bottom:14px;">Detectar productos</button>
+          ${detected.length ? `
+            <div class="field"><label>3. Revisa antes de guardar (borra lo que no sea producto)</label></div>
+            <div id="t-items">
+              ${detected.map((it, i) => `
+                <div class="ing-row" data-i="${i}">
+                  <input type="text" data-f="name" value="${escapeHtml(it.name)}">
+                  <input type="text" data-f="price" value="${escapeHtml(it.price)}" style="flex:0 0 70px;">
+                  <button data-act="rm-t" data-i="${i}">×</button>
+                </div>`).join("")}
+            </div>
+          ` : ""}
+          <div class="sheet-actions">
+            <button class="btn btn-secondary" id="t-cancel">Cancelar</button>
+            <button class="btn btn-primary" id="t-save" ${detected.length === 0 && !photoData ? "disabled" : ""}>Guardar en historial</button>
+          </div>
+        </div>
+      </div>`;
+    $("#modalRoot").innerHTML = html;
+
+    $("#t-cancel").addEventListener("click", closeSheet);
+    $("#ovT").addEventListener("click", e => { if (e.target.id === "ovT") closeSheet(); });
+
+    $("#t-photo").addEventListener("change", async e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      photoData = await compressImageFile(file);
+      render();
+    });
+
+    $("#t-detect").addEventListener("click", () => {
+      const text = $("#t-text").value;
+      detected = parseTicketText(text);
+      if (detected.length === 0) {
+        openConfirm("Sin resultados", "No he podido detectar líneas con precio en ese texto. Puedes añadir productos a mano tras guardar, o revisar que el texto pegado sea el correcto.", "Entendido", () => render());
+        return;
+      }
+      render();
+    });
+
+    $$('[data-act="rm-t"]').forEach(b => b.addEventListener("click", () => { detected.splice(Number(b.dataset.i), 1); render(); }));
+    $$("#t-items .ing-row").forEach(row => {
+      row.querySelectorAll("[data-f]").forEach(inp => {
+        inp.addEventListener("input", () => { detected[Number(row.dataset.i)][inp.dataset.f] = inp.value; });
+      });
+    });
+
+    $("#t-save").addEventListener("click", () => {
+      addHistoryEntry({
+        type: "ticket",
+        items: detected.map(d => ({ name: d.name, price: d.price })),
+        photo: photoData || null
+      });
+      closeSheet();
+    });
+  };
+  render();
+}
+
+// ==================================================================
 // RENDER: HISTORIAL
 // ==================================================================
 function renderHistorial() {
@@ -501,14 +632,21 @@ function renderHistorial() {
   $("#histList").innerHTML = history.map(h => {
     const d = h.createdAt?.toDate ? h.createdAt.toDate() : new Date();
     const dateLabel = d.toLocaleDateString("es-ES", { day: "numeric", month: "long", year: "numeric" });
+    const isTicket = h.type === "ticket";
+    const rows = (h.items || []).map(it =>
+      isTicket
+        ? `<div>${escapeHtml(it.name)}${it.price ? " — " + escapeHtml(it.price) + " €" : ""}</div>`
+        : `<div>${escapeHtml(it.name)} — ${it.from} → ${it.to}</div>`
+    ).join("");
     return `
       <div class="hist-entry" data-id="${h.id}">
         <div class="hist-head">
-          <span class="hist-date">${dateLabel}</span>
-          <span class="hist-count">${h.items.length} producto(s)</span>
+          <span class="hist-date">${isTicket ? "🧾 " : ""}${dateLabel}</span>
+          <span class="hist-count">${(h.items||[]).length} producto(s)</span>
         </div>
         <div class="hist-body">
-          ${h.items.map(it => `<div>${escapeHtml(it.name)} — ${it.from} → ${it.to}</div>`).join("")}
+          ${h.photo ? `<img src="${h.photo}" style="width:100%;border-radius:10px;margin-bottom:8px;">` : ""}
+          ${rows}
         </div>
       </div>`;
   }).join("");

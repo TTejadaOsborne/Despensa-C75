@@ -125,6 +125,7 @@ export function listenHistory(cb) {
   });
 }
 
-export async function addHistoryEntry(items) {
-  return addDoc(historyCol, { items, createdAt: serverTimestamp() });
+export async function addHistoryEntry(entry) {
+  // entry: { items: [...], type: 'purchase' | 'ticket', photo?: base64 string }
+  return addDoc(historyCol, { ...entry, createdAt: serverTimestamp() });
 }
