@@ -21,6 +21,9 @@ let syncFlags = { products: false, recipes: false, menu: false, history: false, 
 const $ = sel => document.querySelector(sel);
 const $$ = sel => Array.from(document.querySelectorAll(sel));
 const escapeHtml = s => (s || "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+// Un producto entra en "por comprar" solo si está bajo mínimo Y tiene activo el seguimiento de compra.
+// trackShopping !== false trata a los productos antiguos (sin este campo aún) como activados, por compatibilidad.
+const needsRestock = p => p.stock <= p.min && p.trackShopping !== false;
 
 // ---------- Estado de compra compartido (doc único en Firestore) ----------
 const shoppingDocRef = doc(db, "state", "shopping");
@@ -77,9 +80,12 @@ function labelFor(offset) {
 // ==================================================================
 // RENDER: INVENTARIO
 // ==================================================================
+let selectMode = false;
+let selectedIds = new Set();
+
 function renderInventario() {
   const total = products.length;
-  const low = products.filter(p => p.stock <= p.min).length;
+  const low = products.filter(needsRestock).length;
   const frozen = products.filter(p => p.location === "Congelador").length;
   $("#invMetrics").innerHTML = `
     <div class="metric"><div class="num">${total}</div><div class="label">Productos</div></div>
@@ -89,7 +95,31 @@ function renderInventario() {
 
   if (products.length === 0) {
     $("#invList").innerHTML = emptyState("🧺", "Tu despensa está vacía", "Pulsa el botón + para añadir tu primer producto.");
+    $("#invSelectBar").innerHTML = "";
     return;
+  }
+
+  // Barra de selección múltiple
+  if (selectMode) {
+    const n = selectedIds.size;
+    $("#invSelectBar").innerHTML = `
+      <div class="tip" style="display:flex;align-items:center;gap:10px;margin:0 0 12px;">
+        <div style="flex:1;font-size:13px;"><b>${n}</b> seleccionado(s)</div>
+        <button class="mini-link" id="selCancel">Cancelar</button>
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:14px;">
+        <button class="btn btn-secondary" id="selTrackOff" style="flex:1;font-size:13px;padding:10px;" ${n===0?"disabled":""}>Desactivar seguimiento</button>
+        <button class="btn btn-secondary" id="selTrackOn" style="flex:1;font-size:13px;padding:10px;" ${n===0?"disabled":""}>Activar seguimiento</button>
+      </div>`;
+    $("#selCancel").addEventListener("click", () => { selectMode = false; selectedIds.clear(); renderInventario(); });
+    $("#selTrackOff").addEventListener("click", () => bulkSetTracking(false));
+    $("#selTrackOn").addEventListener("click", () => bulkSetTracking(true));
+  } else {
+    $("#invSelectBar").innerHTML = `
+      <div style="text-align:right;margin-bottom:10px;">
+        <button class="mini-link" id="selStart">Seleccionar varios</button>
+      </div>`;
+    $("#selStart").addEventListener("click", () => { selectMode = true; renderInventario(); });
   }
 
   const byZone = {};
@@ -100,22 +130,25 @@ function renderInventario() {
     if (!byZone[zone]) return;
     html += `<div class="zone-group"><div class="zone-title">${escapeHtml(zone)}</div>`;
     byZone[zone].forEach(p => {
-      const low = p.stock <= p.min;
+      const low = needsRestock(p);
+      const checked = selectedIds.has(p.id);
       html += `
         <div class="product-row ${low ? "low" : ""}" data-id="${p.id}">
+          ${selectMode ? `<div class="checkbox ${checked ? "on" : ""}" data-select="${p.id}">${checked ? "✓" : ""}</div>` : ""}
           <div class="product-info">
             <div class="product-name">${escapeHtml(p.name)}</div>
             <div class="product-meta">
               <span class="chip">${escapeHtml(p.location)}</span>
               ${p.needsDefrost ? `<span class="chip frost">❄️ ${p.defrostHours}h antes</span>` : ""}
-              <span>mín. ${p.min}</span>
+              ${p.trackShopping === false ? `<span class="chip" style="background:#EDEAE0;color:var(--text-soft);">sin seguimiento</span>` : `<span>mín. ${p.min}</span>`}
             </div>
           </div>
+          ${selectMode ? "" : `
           <div class="stepper">
             <button data-act="dec" data-id="${p.id}">−</button>
             <span class="val">${p.stock}</span>
             <button data-act="inc" data-id="${p.id}">+</button>
-          </div>
+          </div>`}
         </div>`;
     });
     html += `</div>`;
@@ -123,7 +156,32 @@ function renderInventario() {
   $("#invList").innerHTML = html;
 }
 
+function bulkSetTracking(value) {
+  const ids = Array.from(selectedIds);
+  if (ids.length === 0) return;
+  openConfirm(
+    value ? "Activar seguimiento" : "Desactivar seguimiento",
+    `Se aplicará a ${ids.length} producto(s) seleccionado(s).`,
+    "Aplicar",
+    () => {
+      ids.forEach(id => updateProduct(id, { trackShopping: value }));
+      selectMode = false;
+      selectedIds.clear();
+      closeSheet();
+      renderInventario();
+    }
+  );
+}
+
 $("#invList").addEventListener("click", e => {
+  if (selectMode) {
+    const row = e.target.closest(".product-row");
+    if (!row) return;
+    const id = row.dataset.id;
+    if (selectedIds.has(id)) selectedIds.delete(id); else selectedIds.add(id);
+    renderInventario();
+    return;
+  }
   const btn = e.target.closest("button[data-act]");
   if (btn) {
     const p = products.find(x => x.id === btn.dataset.id);
@@ -137,6 +195,7 @@ $("#invList").addEventListener("click", e => {
 });
 let pressTimer = null;
 $("#invList").addEventListener("touchstart", e => {
+  if (selectMode) return;
   const row = e.target.closest(".product-row");
   if (!row) return;
   pressTimer = setTimeout(() => openProductSheet(products.find(x => x.id === row.dataset.id)), 480);
@@ -148,7 +207,7 @@ $("#fabAdd").addEventListener("click", () => openProductSheet(null));
 
 function openProductSheet(product) {
   const editing = !!product;
-  const p = product || { name: "", zone: ZONES[0], location: "Despensa", stock: 1, min: 1, needsDefrost: false, defrostHours: 24 };
+  const p = product || { name: "", zone: ZONES[0], location: "Despensa", stock: 1, min: 1, needsDefrost: false, defrostHours: 24, trackShopping: true };
   const html = `
     <div class="overlay" id="ov">
       <div class="sheet">
@@ -166,6 +225,7 @@ function openProductSheet(product) {
           <div class="field"><label>Stock actual</label><input type="number" id="f-stock" value="${p.stock}" min="0"></div>
           <div class="field"><label>Mínimo (avisa al llegar aquí)</label><input type="number" id="f-min" value="${p.min}" min="0"></div>
         </div>
+        <div class="check-field"><input type="checkbox" id="f-track" ${p.trackShopping !== false ? "checked" : ""}><label for="f-track" style="margin:0;">Avisar y añadir a la lista de la compra cuando falte</label></div>
         <div class="check-field"><input type="checkbox" id="f-frost" ${p.needsDefrost?"checked":""}><label for="f-frost" style="margin:0;">Hay que sacarlo del congelador con antelación</label></div>
         <div class="field" id="f-frost-hours-wrap" style="display:${p.needsDefrost?"block":"none"};">
           <label>Horas de antelación</label><input type="number" id="f-frost-hours" value="${p.defrostHours}" min="1">
@@ -201,7 +261,8 @@ function openProductSheet(product) {
       stock: Number($("#f-stock").value) || 0,
       min: Number($("#f-min").value) || 0,
       needsDefrost: $("#f-frost").checked,
-      defrostHours: Number($("#f-frost-hours").value) || 24
+      defrostHours: Number($("#f-frost-hours").value) || 24,
+      trackShopping: $("#f-track").checked
     };
     if (editing) updateProduct(p.id, patch); else addProduct(patch);
     closeSheet();
@@ -487,7 +548,7 @@ function openSuggestionsSheet() {
 // RENDER: COMPRA
 // ==================================================================
 function renderCompra() {
-  const needed = products.filter(p => p.stock <= p.min);
+  const needed = products.filter(needsRestock);
   const total = needed.length;
   const checkedCount = needed.filter(p => shoppingChecked[p.id]).length;
   $("#shopProgressBar").style.width = total ? `${Math.round(checkedCount/total*100)}%` : "0%";
@@ -530,7 +591,7 @@ $("#shopList").addEventListener("click", e => {
 });
 
 $("#btnConfirmPurchase").addEventListener("click", () => {
-  const needed = products.filter(p => p.stock <= p.min && shoppingChecked[p.id]);
+  const needed = products.filter(p => needsRestock(p) && shoppingChecked[p.id]);
   if (needed.length === 0) {
     openConfirm("Nada marcado", "Marca los productos que has comprado antes de confirmar.", "Entendido", closeSheet);
     return;
@@ -545,7 +606,7 @@ $("#btnConfirmPurchase").addEventListener("click", () => {
 });
 
 $("#btnWhatsapp").addEventListener("click", () => {
-  const needed = products.filter(p => p.stock <= p.min);
+  const needed = products.filter(needsRestock);
   if (needed.length === 0) return;
   const byZone = {};
   needed.forEach(p => { (byZone[p.zone] ||= []).push(p); });

@@ -53,6 +53,7 @@ export async function addProduct(p) {
     min: Number(p.min) || 1,
     needsDefrost: !!p.needsDefrost,
     defrostHours: Number(p.defrostHours) || 24,
+    trackShopping: p.trackShopping !== false,
     updatedAt: serverTimestamp()
   });
 }
