@@ -101,6 +101,7 @@ export async function addRecipe(r) {
     name: r.name,
     ingredients: r.ingredients || [], // [{productId, name, qty}]
     notes: r.notes || "",
+    url: r.url || "",
     updatedAt: serverTimestamp()
   });
 }

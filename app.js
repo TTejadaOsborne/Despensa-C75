@@ -360,16 +360,19 @@ function frostWarningsFor(recipeId) {
 
 function openMealSheet(dateStr, slotId) {
   const current = (menuByDate[dateStr] || {})[slotId];
+  const inspirationUrl = `https://maraolmoss.com/recetas/?comida=${slotId}`;
   const html = `
     <div class="overlay" id="ov">
       <div class="sheet">
         <h3>${MEAL_SLOTS.find(s=>s.id===slotId).label} — ${escapeHtml(labelFor(selectedDayOffset).dname)}</h3>
+        <a href="${inspirationUrl}" target="_blank" rel="noopener" class="btn btn-secondary btn-block" style="margin-bottom:14px;text-decoration:none;box-sizing:border-box;">🔗 Inspiración para ${slotId} (Mara Olmos)</a>
         <div class="field"><label>Elegir receta guardada</label>
           <select id="m-recipe">
             <option value="">— Ninguna —</option>
             ${recipes.map(r => `<option value="${r.id}" ${current?.recipeId===r.id?"selected":""}>${escapeHtml(r.name)}</option>`).join("")}
           </select>
         </div>
+        <div style="margin:-6px 0 14px;"><button class="mini-link" id="m-newRecipe">+ Añadir la receta completa (no solo el nombre)</button></div>
         <div class="field"><label>O escribe algo suelto (sin receta guardada)</label>
           <input type="text" id="m-free" placeholder="Ej. Cenar fuera, pizza congelada…" value="${current && !current.recipeId ? escapeHtml(current.freeText||"") : ""}">
         </div>
@@ -384,6 +387,11 @@ function openMealSheet(dateStr, slotId) {
   $("#ov").addEventListener("click", e => { if (e.target.id === "ov") closeSheet(); });
   $("#m-recipe").addEventListener("change", () => { if ($("#m-recipe").value) $("#m-free").value = ""; });
   $("#m-free").addEventListener("input", () => { if ($("#m-free").value) $("#m-recipe").value = ""; });
+  $("#m-newRecipe").addEventListener("click", () => {
+    openRecipeEditor(null, (id, name) => {
+      setMealSlot(dateStr, slotId, { recipeId: id, recipeName: name });
+    });
+  });
   $("#m-save").addEventListener("click", () => {
     const rid = $("#m-recipe").value;
     const free = $("#m-free").value.trim();
@@ -407,7 +415,7 @@ function openRecipesSheet() {
           <div class="product-row" data-rid="${r.id}">
             <div class="product-info">
               <div class="product-name">${escapeHtml(r.name)}</div>
-              <div class="product-meta">${(r.ingredients||[]).length} ingrediente(s)</div>
+              <div class="product-meta">${(r.ingredients||[]).length} ingrediente(s)${r.url ? ` · <a href="${escapeHtml(r.url)}" target="_blank" rel="noopener" style="color:var(--primary);">🔗 receta</a>` : ""}</div>
             </div>
             <button class="mini-link" data-act="edit-recipe" data-rid="${r.id}">Editar</button>
           </div>`).join("")}
@@ -424,7 +432,7 @@ function openRecipesSheet() {
   $$('[data-act="edit-recipe"]').forEach(b => b.addEventListener("click", () => openRecipeEditor(recipes.find(r => r.id === b.dataset.rid))));
 }
 
-function openRecipeEditor(recipe) {
+function openRecipeEditor(recipe, onSaved) {
   const editing = !!recipe;
   const ingredients = recipe ? [...(recipe.ingredients||[])] : [];
   const render = () => {
@@ -433,6 +441,9 @@ function openRecipeEditor(recipe) {
         <div class="sheet">
           <h3>${editing ? "Editar receta" : "Nueva receta"}</h3>
           <div class="field"><label>Nombre</label><input type="text" id="re-name" value="${escapeHtml(recipe?.name||"")}" placeholder="Ej. Salmón con verduras"></div>
+          <div class="field"><label>Enlace a la receta original (opcional)</label>
+            <input type="text" id="re-url" value="${escapeHtml(recipe?.url||"")}" placeholder="https://...">
+          </div>
           <div class="field"><label>Ingredientes de tu despensa (opcional, activa el aviso de descongelado)</label>
             <div id="ingRows">
               ${ingredients.map((ing, i) => `
@@ -480,13 +491,21 @@ function openRecipeEditor(recipe) {
         }, true);
       });
     }
-    $("#re-save").addEventListener("click", () => {
+    $("#re-save").addEventListener("click", async () => {
       const name = $("#re-name").value.trim();
       if (!name) { $("#re-name").focus(); return; }
       const cleanIng = ingredients.filter(i => i.productId).map(i => ({ productId: i.productId, name: i.name, qty: i.qty||"" }));
-      const patch = { name, ingredients: cleanIng, notes: $("#re-notes").value.trim() };
-      if (editing) updateRecipe(recipe.id, patch); else addRecipe(patch);
-      closeSheet();
+      const url = $("#re-url").value.trim();
+      const patch = { name, ingredients: cleanIng, notes: $("#re-notes").value.trim(), url };
+      if (editing) {
+        await updateRecipe(recipe.id, patch);
+        closeSheet();
+        if (onSaved) onSaved(recipe.id, name);
+      } else {
+        const ref = await addRecipe(patch);
+        closeSheet();
+        if (onSaved) onSaved(ref.id, name);
+      }
     });
   };
   render();
