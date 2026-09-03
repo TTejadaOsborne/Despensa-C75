@@ -3,7 +3,8 @@ import {
   listenProducts, addProduct, updateProduct, deleteProduct,
   listenRecipes, addRecipe, updateRecipe, deleteRecipe,
   listenMenu, setMealSlot, clearMealSlot,
-  listenHistory, addHistoryEntry
+  listenHistory, addHistoryEntry,
+  listenInspirations, addInspiration, deleteInspiration
 } from "./data.js";
 import {
   db, doc, setDoc, onSnapshot, updateDoc
@@ -14,9 +15,10 @@ let products = [];
 let recipes = [];
 let menuByDate = {};
 let history = [];
+let inspirations = [];
 let shoppingChecked = {}; // { productId: true }
 let selectedDayOffset = 0;
-let syncFlags = { products: false, recipes: false, menu: false, history: false, shopping: false };
+let syncFlags = { products: false, recipes: false, menu: false, history: false, shopping: false, inspirations: false };
 
 const $ = sel => document.querySelector(sel);
 const $$ = sel => Array.from(document.querySelectorAll(sel));
@@ -51,6 +53,7 @@ listenProducts(items => { products = items; syncFlags.products = true; renderAll
 listenRecipes(items => { recipes = items; syncFlags.recipes = true; renderAll(); });
 listenMenu(map => { menuByDate = map; syncFlags.menu = true; renderAll(); });
 listenHistory(items => { history = items; syncFlags.history = true; renderAll(); });
+listenInspirations(items => { inspirations = items; syncFlags.inspirations = true; renderAll(); });
 
 function updateSyncStatus() {
   const allOk = Object.values(syncFlags).every(Boolean);
@@ -324,7 +327,7 @@ function renderMenu() {
 
   const dateStr = dateStrFor(selectedDayOffset);
   const dayData = menuByDate[dateStr] || {};
-  let html = `<div class="section-head" style="margin-top:2px;"><button class="mini-link" id="btnSuggest">💡 Qué puedo cocinar</button><button class="mini-link" id="btnManageRecipes">Gestionar recetas</button></div>`;
+  let html = `<div class="section-head" style="margin-top:2px;flex-wrap:wrap;gap:8px 14px;"><button class="mini-link" id="btnSuggest">💡 Qué puedo cocinar</button><button class="mini-link" id="btnInspiration">💭 Ideas guardadas</button><button class="mini-link" id="btnManageRecipes">Gestionar recetas</button></div>`;
   MEAL_SLOTS.forEach(slot => {
     const meal = dayData[slot.id];
     const name = meal ? (meal.recipeName || meal.freeText) : null;
@@ -337,7 +340,6 @@ function renderMenu() {
         <div class="meal-actions">
           <button class="btn btn-secondary" data-act="edit-meal" data-slot="${slot.id}">${name ? "Cambiar" : "Planificar"}</button>
           ${name ? `<button class="btn btn-secondary" data-act="clear-meal" data-slot="${slot.id}">Quitar</button>` : ""}
-          <a href="https://maraolmoss.com/recetas/?comida=${slot.id}" target="_blank" rel="noopener" class="btn btn-secondary" style="text-decoration:none;">🔗 Inspiración</a>
         </div>
       </div>`;
   });
@@ -345,6 +347,7 @@ function renderMenu() {
 
   $("#btnManageRecipes")?.addEventListener("click", openRecipesSheet);
   $("#btnSuggest")?.addEventListener("click", openSuggestionsSheet);
+  $("#btnInspiration")?.addEventListener("click", () => openInspirationSheet());
   $$('[data-act="edit-meal"]').forEach(b => b.addEventListener("click", () => openMealSheet(dateStr, b.dataset.slot)));
   $$('[data-act="clear-meal"]').forEach(b => b.addEventListener("click", () => clearMealSlot(dateStr, b.dataset.slot)));
 }
@@ -362,12 +365,11 @@ function frostWarningsFor(recipeId) {
 
 function openMealSheet(dateStr, slotId) {
   const current = (menuByDate[dateStr] || {})[slotId];
-  const inspirationUrl = `https://maraolmoss.com/recetas/?comida=${slotId}`;
   const html = `
     <div class="overlay" id="ov">
       <div class="sheet">
         <h3>${MEAL_SLOTS.find(s=>s.id===slotId).label} — ${escapeHtml(labelFor(selectedDayOffset).dname)}</h3>
-        <a href="${inspirationUrl}" target="_blank" rel="noopener" class="btn btn-secondary btn-block" style="margin-bottom:14px;text-decoration:none;box-sizing:border-box;">🔗 Inspiración para ${slotId} (Mara Olmos)</a>
+        <button class="btn btn-secondary btn-block" id="m-inspiration" style="margin-bottom:14px;">💭 Ver ideas guardadas</button>
         <div class="field"><label>Elegir receta guardada</label>
           <select id="m-recipe">
             <option value="">— Ninguna —</option>
@@ -387,6 +389,7 @@ function openMealSheet(dateStr, slotId) {
   $("#modalRoot").innerHTML = html;
   $("#m-cancel").addEventListener("click", closeSheet);
   $("#ov").addEventListener("click", e => { if (e.target.id === "ov") closeSheet(); });
+  $("#m-inspiration").addEventListener("click", () => openInspirationSheet());
   $("#m-recipe").addEventListener("change", () => { if ($("#m-recipe").value) $("#m-free").value = ""; });
   $("#m-free").addEventListener("input", () => { if ($("#m-free").value) $("#m-recipe").value = ""; });
   $("#m-newRecipe").addEventListener("click", () => {
@@ -435,7 +438,7 @@ function openRecipesSheet() {
 }
 
 function openRecipeEditor(recipe, onSaved) {
-  const editing = !!recipe;
+  const editing = !!(recipe && recipe.id);
   const ingredients = recipe ? [...(recipe.ingredients||[])] : [];
   const render = () => {
     const html = `
@@ -578,6 +581,128 @@ function openSuggestionsSheet() {
     setMealSlot(dateStr, b.dataset.slot, { recipeId: r.id, recipeName: r.name });
     closeSheet();
   }));
+}
+
+// ---------- Ideas guardadas (enlaces de inspiración: web, Instagram, TikTok, YouTube...) ----------
+function detectSource(url) {
+  const u = url.toLowerCase();
+  if (u.includes("instagram.com")) return { id: "instagram", label: "Instagram", icon: "📸" };
+  if (u.includes("tiktok.com")) return { id: "tiktok", label: "TikTok", icon: "🎵" };
+  if (u.includes("youtube.com") || u.includes("youtu.be")) return { id: "youtube", label: "YouTube", icon: "▶️" };
+  if (u.includes("pinterest.")) return { id: "pinterest", label: "Pinterest", icon: "📌" };
+  return { id: "web", label: "Web", icon: "🌐" };
+}
+
+function matchesPantry(insp) {
+  return (insp.tags || []).some(t =>
+    products.some(p => p.stock > 0 && (
+      p.name.toLowerCase().includes(t.toLowerCase()) || t.toLowerCase().includes(p.name.toLowerCase())
+    ))
+  );
+}
+
+let inspirationFilter = "";
+let inspirationOnlyPantry = false;
+
+function openInspirationSheet() {
+  const render = () => {
+    let list = inspirations;
+    if (inspirationFilter.trim()) {
+      const f = inspirationFilter.trim().toLowerCase();
+      list = list.filter(i => i.title.toLowerCase().includes(f) || (i.tags || []).some(t => t.toLowerCase().includes(f)));
+    }
+    if (inspirationOnlyPantry) list = list.filter(matchesPantry);
+
+    const html = `
+      <div class="overlay" id="ovI">
+        <div class="sheet">
+          <h3>Ideas guardadas</h3>
+          <div class="field"><label>Filtrar por alimento (ej. pollo, legumbres…)</label>
+            <input type="text" id="i-filter" value="${escapeHtml(inspirationFilter)}" placeholder="Escribe un alimento">
+          </div>
+          <div class="check-field"><input type="checkbox" id="i-onlypantry" ${inspirationOnlyPantry?"checked":""}><label for="i-onlypantry" style="margin:0;">Solo con alimentos que tengo en casa ahora</label></div>
+          <div id="iList">
+            ${list.length === 0
+              ? `<p style="font-size:13px;color:var(--text-soft);">${inspirations.length === 0 ? "Aún no has guardado ninguna idea." : "Nada coincide con ese filtro."}</p>`
+              : list.map(i => {
+                  const src = detectSource(i.url);
+                  return `
+                  <div class="product-row" style="align-items:flex-start;">
+                    <div class="product-info">
+                      <div class="product-name">${src.icon} ${escapeHtml(i.title || i.url)}</div>
+                      <div class="product-meta" style="flex-wrap:wrap;gap:4px;">
+                        ${(i.tags||[]).map(t => `<span class="chip">${escapeHtml(t)}</span>`).join("")}
+                        ${matchesPantry(i) ? `<span class="chip" style="background:var(--primary);color:white;">con lo que tienes</span>` : ""}
+                      </div>
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:6px;">
+                      <a href="${escapeHtml(i.url)}" target="_blank" rel="noopener" class="btn btn-secondary" style="padding:8px 10px;font-size:12.5px;text-decoration:none;text-align:center;">Abrir</a>
+                      <button class="btn btn-secondary" data-act="use-insp" data-id="${i.id}" style="padding:8px 10px;font-size:12.5px;">Usar receta</button>
+                      <button class="mini-link" data-act="del-insp" data-id="${i.id}" style="color:var(--danger);font-size:12px;">Eliminar</button>
+                    </div>
+                  </div>`;
+                }).join("")}
+          </div>
+          <button class="mini-link" id="i-addNew" style="margin-top:6px;">+ Guardar un enlace nuevo</button>
+          <div class="sheet-actions" style="margin-top:14px;">
+            <button class="btn btn-secondary btn-block" id="i-close">Cerrar</button>
+          </div>
+        </div>
+      </div>`;
+    $("#modalRoot").innerHTML = html;
+    $("#i-close").addEventListener("click", closeSheet);
+    $("#ovI").addEventListener("click", e => { if (e.target.id === "ovI") closeSheet(); });
+    $("#i-filter").addEventListener("input", e => { inspirationFilter = e.target.value; render(); });
+    $("#i-onlypantry").addEventListener("change", e => { inspirationOnlyPantry = e.target.checked; render(); });
+    $("#i-addNew").addEventListener("click", openAddInspirationSheet);
+    $$('[data-act="use-insp"]').forEach(b => b.addEventListener("click", () => {
+      const insp = inspirations.find(x => x.id === b.dataset.id);
+      if (!insp) return;
+      openRecipeEditor({ name: insp.title, url: insp.url, ingredients: [], notes: "" });
+    }));
+    $$('[data-act="del-insp"]').forEach(b => b.addEventListener("click", () => {
+      const insp = inspirations.find(x => x.id === b.dataset.id);
+      openConfirm("Eliminar idea", `¿Eliminar "${insp?.title || insp?.url}"?`, "Eliminar", () => {
+        deleteInspiration(b.dataset.id);
+        closeSheet();
+        openInspirationSheet();
+      }, true);
+    }));
+  };
+  render();
+}
+
+function openAddInspirationSheet() {
+  const html = `
+    <div class="overlay" id="ovA">
+      <div class="sheet">
+        <h3>Guardar un enlace</h3>
+        <div class="field"><label>Enlace (web, Instagram, TikTok, YouTube…)</label>
+          <input type="text" id="a-url" placeholder="https://...">
+        </div>
+        <div class="field"><label>Título (para reconocerlo luego)</label>
+          <input type="text" id="a-title" placeholder="Ej. Pollo al curry de Instagram">
+        </div>
+        <div class="field"><label>Alimentos que lleva (separados por comas)</label>
+          <input type="text" id="a-tags" placeholder="pollo, arroz, curry">
+        </div>
+        <div class="sheet-actions">
+          <button class="btn btn-secondary" id="a-cancel">Cancelar</button>
+          <button class="btn btn-primary" id="a-save">Guardar</button>
+        </div>
+      </div>
+    </div>`;
+  $("#modalRoot").innerHTML = html;
+  $("#a-cancel").addEventListener("click", () => openInspirationSheet());
+  $("#ovA").addEventListener("click", e => { if (e.target.id === "ovA") openInspirationSheet(); });
+  $("#a-save").addEventListener("click", async () => {
+    const url = $("#a-url").value.trim();
+    if (!url) { $("#a-url").focus(); return; }
+    const title = $("#a-title").value.trim() || url;
+    const tags = $("#a-tags").value.split(",").map(t => t.trim()).filter(Boolean);
+    await addInspiration({ url, title, tags, source: detectSource(url).id });
+    openInspirationSheet();
+  });
 }
 
 // ==================================================================

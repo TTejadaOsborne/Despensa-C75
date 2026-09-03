@@ -46,6 +46,7 @@ const productsCol = collection(db, "products");
 const recipesCol = collection(db, "recipes");
 const menuCol = collection(db, "menu");
 const historyCol = collection(db, "history");
+const inspirationsCol = collection(db, "inspirations");
 
 // --- Productos ---
 export function listenProducts(cb) {
@@ -145,4 +146,28 @@ export function listenHistory(cb) {
 export async function addHistoryEntry(entry) {
   // entry: { items: [...], type: 'purchase' | 'ticket', photo?: base64 string }
   return addDoc(historyCol, { ...entry, createdAt: serverTimestamp() });
+}
+
+// --- Ideas de inspiración (enlaces externos: web, Instagram, TikTok, YouTube...) ---
+export function listenInspirations(cb) {
+  const q = query(inspirationsCol, orderBy("createdAt", "desc"));
+  return onSnapshot(q, snap => {
+    const items = [];
+    snap.forEach(d => items.push({ id: d.id, ...d.data() }));
+    cb(items);
+  });
+}
+
+export async function addInspiration(insp) {
+  return addDoc(inspirationsCol, {
+    title: insp.title || "",
+    url: insp.url,
+    tags: insp.tags || [],
+    source: insp.source || "web",
+    createdAt: serverTimestamp()
+  });
+}
+
+export async function deleteInspiration(id) {
+  return deleteDoc(doc(db, "inspirations", id));
 }
