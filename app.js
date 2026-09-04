@@ -28,8 +28,8 @@ const escapeHtml = s => (s || "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&
 const needsRestock = p => p.stock <= p.min && p.trackShopping !== false;
 const unitOf = p => UNIT_MAP[p.unit] || UNIT_MAP.ud;
 const fmtNum = n => { const r = Math.round((n + Number.EPSILON) * 100) / 100; return Number.isInteger(r) ? String(r) : String(r); };
-const fmtQty = p => { const u = unitOf(p); const n = fmtNum(p.stock); return u.id === "ud" ? n : `${n} ${u.short}`; };
-const fmtMin = p => { const u = unitOf(p); const n = fmtNum(p.min); return u.id === "ud" ? `mín. ${n}` : `mín. ${n} ${u.short}`; };
+const fmtQty = p => { const u = unitOf(p); return `${fmtNum(p.stock)} ${u.short}`; };
+const fmtMin = p => { const u = unitOf(p); return `mín. ${fmtNum(p.min)} ${u.short}`; };
 
 // ---------- Estado de compra compartido (doc único en Firestore) ----------
 const shoppingDocRef = doc(db, "state", "shopping");
@@ -130,14 +130,14 @@ function renderInventario() {
     $("#selStart").addEventListener("click", () => { selectMode = true; renderInventario(); });
   }
 
-  const byZone = {};
-  products.forEach(p => { (byZone[p.zone] ||= []).push(p); });
+  const byLocation = {};
+  products.forEach(p => { (byLocation[p.location] ||= []).push(p); });
 
   let html = "";
-  ZONES.forEach(zone => {
-    if (!byZone[zone]) return;
-    html += `<div class="zone-group"><div class="zone-title">${escapeHtml(zone)}</div>`;
-    byZone[zone].forEach(p => {
+  LOCATIONS.forEach(loc => {
+    if (!byLocation[loc]) return;
+    html += `<div class="zone-group"><div class="zone-title">${escapeHtml(loc)}</div>`;
+    byLocation[loc].forEach(p => {
       const low = needsRestock(p);
       const checked = selectedIds.has(p.id);
       html += `
@@ -146,7 +146,7 @@ function renderInventario() {
           <div class="product-info">
             <div class="product-name">${escapeHtml(p.name)}</div>
             <div class="product-meta">
-              <span class="chip">${escapeHtml(p.location)}</span>
+              <span class="chip">${escapeHtml(p.zone)}</span>
               ${p.needsDefrost ? `<span class="chip frost">❄️ ${p.defrostHours}h antes</span>` : ""}
               ${p.trackShopping === false ? `<span class="chip" style="background:#EDEAE0;color:var(--text-soft);">sin seguimiento</span>` : `<span>${fmtMin(p)}</span>`}
             </div>
@@ -440,6 +440,7 @@ function openRecipesSheet() {
 function openRecipeEditor(recipe, onSaved) {
   const editing = !!(recipe && recipe.id);
   const ingredients = recipe ? [...(recipe.ingredients||[])] : [];
+  let showPaste = false;
   const render = () => {
     const html = `
       <div class="overlay" id="ov2">
@@ -449,21 +450,34 @@ function openRecipeEditor(recipe, onSaved) {
           <div class="field"><label>Enlace a la receta original (opcional)</label>
             <input type="text" id="re-url" value="${escapeHtml(recipe?.url||"")}" placeholder="https://...">
           </div>
-          <div class="field"><label>Ingredientes de tu despensa (opcional, activa el aviso de descongelado)</label>
+          <button class="mini-link" id="re-togglePaste" style="margin-bottom:10px;">${showPaste ? "− Ocultar pegado" : "🧾 Pegar receta desde web/Instagram"}</button>
+          ${showPaste ? `
+            <div class="field">
+              <label>Pega aquí el texto de la receta (ingredientes y pasos, tal cual los copiaste)</label>
+              <textarea id="re-paste" style="min-height:100px;" placeholder="200 g de pollo&#10;1 cebolla&#10;2 cucharadas de aceite&#10;Sofríe la cebolla...&#10;Añade el pollo y cocina 10 min"></textarea>
+            </div>
+            <button class="btn btn-secondary btn-block" id="re-detect" style="margin-bottom:14px;">Detectar ingredientes y pasos</button>
+          ` : ""}
+          <div class="field"><label>Ingredientes (el nombre es libre; vincúlalo a un producto solo si quieres que cuente para el stock y los avisos de descongelado)</label>
             <div id="ingRows">
               ${ingredients.map((ing, i) => `
-                <div class="ing-row" data-i="${i}">
-                  <select data-f="productId">
-                    <option value="">— Elige producto —</option>
-                    ${products.map(p => `<option value="${p.id}" ${ing.productId===p.id?"selected":""}>${escapeHtml(p.name)}</option>`).join("")}
-                  </select>
-                  <input type="text" data-f="qty" placeholder="Cantidad" value="${escapeHtml(ing.qty||"")}">
-                  <button data-act="rm-ing" data-i="${i}">×</button>
+                <div class="ing-row-full" data-i="${i}">
+                  <div style="display:flex;gap:8px;margin-bottom:4px;">
+                    <input type="text" data-f="name" placeholder="Ej. 200 g de pollo" value="${escapeHtml(ing.name||"")}" style="flex:1;">
+                    <button data-act="rm-ing" data-i="${i}" style="background:none;border:none;color:var(--danger);font-size:18px;">×</button>
+                  </div>
+                  <div class="ing-row" data-i="${i}" style="margin-bottom:10px;">
+                    <select data-f="productId">
+                      <option value="">— Sin vincular a producto —</option>
+                      ${products.map(p => `<option value="${p.id}" ${ing.productId===p.id?"selected":""}>${escapeHtml(p.name)}</option>`).join("")}
+                    </select>
+                    <input type="text" data-f="qty" placeholder="Cantidad" value="${escapeHtml(ing.qty||"")}">
+                  </div>
                 </div>`).join("")}
             </div>
             <button class="mini-link" id="re-addIng">+ Añadir ingrediente</button>
           </div>
-          <div class="field"><label>Notas (opcional)</label><textarea id="re-notes">${escapeHtml(recipe?.notes||"")}</textarea></div>
+          <div class="field"><label>Notas / pasos (opcional)</label><textarea id="re-notes">${escapeHtml(recipe?.notes||"")}</textarea></div>
           <div class="sheet-actions">
             ${editing ? `<button class="btn btn-danger" id="re-delete">Eliminar</button>` : ""}
             <button class="btn btn-secondary" id="re-cancel">Cancelar</button>
@@ -474,14 +488,35 @@ function openRecipeEditor(recipe, onSaved) {
     $("#modalRoot").innerHTML = html;
     $("#re-cancel").addEventListener("click", closeSheet);
     $("#ov2").addEventListener("click", e => { if (e.target.id === "ov2") closeSheet(); });
-    $("#re-addIng").addEventListener("click", () => { ingredients.push({ productId: "", qty: "" }); render(); });
+    $("#re-togglePaste").addEventListener("click", () => { showPaste = !showPaste; render(); });
+    $("#re-detect")?.addEventListener("click", () => {
+      const text = $("#re-paste").value;
+      const { parsedIngredients, steps } = parseRecipeText(text);
+      parsedIngredients.forEach(pi => {
+        const match = products.find(p => pi.name.toLowerCase().includes(p.name.toLowerCase()) || p.name.toLowerCase().includes(pi.name.toLowerCase()));
+        ingredients.push({ productId: match ? match.id : "", name: pi.name, qty: pi.qty });
+      });
+      if (steps.length) {
+        const notesField = $("#re-notes");
+        const prev = notesField.value.trim();
+        notesField.value = (prev ? prev + "\n\n" : "") + "Pasos:\n" + steps.join("\n");
+      }
+      showPaste = false;
+      render();
+    });
+    $("#re-addIng").addEventListener("click", () => { ingredients.push({ productId: "", name: "", qty: "" }); render(); });
     $$('[data-act="rm-ing"]').forEach(b => b.addEventListener("click", () => { ingredients.splice(Number(b.dataset.i), 1); render(); }));
+    $$('.ing-row-full').forEach(row => {
+      row.querySelectorAll('[data-f="name"]').forEach(inp => {
+        inp.addEventListener("change", () => { ingredients[Number(row.dataset.i)].name = inp.value; });
+      });
+    });
     $$('.ing-row').forEach(row => {
       row.querySelectorAll("[data-f]").forEach(inp => {
         inp.addEventListener("change", () => {
           const i = Number(row.dataset.i);
           ingredients[i][inp.dataset.f] = inp.value;
-          if (inp.dataset.f === "productId") {
+          if (inp.dataset.f === "productId" && !ingredients[i].name) {
             const prod = products.find(p => p.id === inp.value);
             ingredients[i].name = prod ? prod.name : "";
           }
@@ -499,7 +534,7 @@ function openRecipeEditor(recipe, onSaved) {
     $("#re-save").addEventListener("click", async () => {
       const name = $("#re-name").value.trim();
       if (!name) { $("#re-name").focus(); return; }
-      const cleanIng = ingredients.filter(i => i.productId).map(i => ({ productId: i.productId, name: i.name, qty: i.qty||"" }));
+      const cleanIng = ingredients.filter(i => (i.name && i.name.trim()) || i.productId).map(i => ({ productId: i.productId||"", name: i.name||"", qty: i.qty||"" }));
       const url = $("#re-url").value.trim();
       const patch = { name, ingredients: cleanIng, notes: $("#re-notes").value.trim(), url };
       if (editing) {
@@ -593,6 +628,46 @@ function detectSource(url) {
   return { id: "web", label: "Web", icon: "🌐" };
 }
 
+// Extracción "mejor esfuerzo" de datos schema.org/Recipe en páginas web normales.
+// Nunca funciona con Instagram/TikTok/Pinterest/YouTube (no exponen esos datos ni son accesibles así).
+// Depende de un proxy CORS público gratuito (allorigins.win) que no controlamos: puede fallar sin que sea un bug.
+async function tryExtractRecipe(url) {
+  const src = detectSource(url);
+  if (src.id !== "web") {
+    return { ok: false, reason: "social" };
+  }
+  let html;
+  try {
+    const proxied = "https://api.allorigins.win/raw?url=" + encodeURIComponent(url);
+    const resp = await fetch(proxied, { signal: AbortSignal.timeout(12000) });
+    if (!resp.ok) return { ok: false, reason: "fetch" };
+    html = await resp.text();
+  } catch (e) {
+    return { ok: false, reason: "fetch" };
+  }
+
+  try {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const scripts = doc.querySelectorAll('script[type="application/ld+json"]');
+    for (const s of scripts) {
+      let data;
+      try { data = JSON.parse(s.textContent); } catch (e) { continue; }
+      const candidates = Array.isArray(data) ? data : (data["@graph"] || [data]);
+      for (const item of candidates) {
+        const types = Array.isArray(item["@type"]) ? item["@type"] : [item["@type"]];
+        if (types && types.includes("Recipe")) {
+          let ingredients = item.recipeIngredient || item.ingredients || [];
+          if (typeof ingredients === "string") ingredients = [ingredients];
+          return { ok: true, name: item.name || "", ingredients };
+        }
+      }
+    }
+    return { ok: false, reason: "no-schema" };
+  } catch (e) {
+    return { ok: false, reason: "parse" };
+  }
+}
+
 function matchesPantry(insp) {
   return (insp.tags || []).some(t =>
     products.some(p => p.stock > 0 && (
@@ -634,6 +709,7 @@ function openInspirationSheet() {
                         ${(i.tags||[]).map(t => `<span class="chip">${escapeHtml(t)}</span>`).join("")}
                         ${matchesPantry(i) ? `<span class="chip" style="background:var(--primary);color:white;">con lo que tienes</span>` : ""}
                       </div>
+                      ${(i.extractedIngredients||[]).length ? `<div style="font-size:11.5px;color:var(--text-soft);margin-top:4px;">${(i.extractedIngredients||[]).slice(0,5).map(escapeHtml).join(", ")}${i.extractedIngredients.length>5?"…":""}</div>` : ""}
                     </div>
                     <div style="display:flex;flex-direction:column;gap:6px;">
                       <a href="${escapeHtml(i.url)}" target="_blank" rel="noopener" class="btn btn-secondary" style="padding:8px 10px;font-size:12.5px;text-decoration:none;text-align:center;">Abrir</a>
@@ -658,7 +734,8 @@ function openInspirationSheet() {
     $$('[data-act="use-insp"]').forEach(b => b.addEventListener("click", () => {
       const insp = inspirations.find(x => x.id === b.dataset.id);
       if (!insp) return;
-      openRecipeEditor({ name: insp.title, url: insp.url, ingredients: [], notes: "" });
+      const notes = (insp.extractedIngredients||[]).length ? "Ingredientes (sin vincular a inventario):\n" + insp.extractedIngredients.join("\n") : "";
+      openRecipeEditor({ name: insp.title, url: insp.url, ingredients: [], notes });
     }));
     $$('[data-act="del-insp"]').forEach(b => b.addEventListener("click", () => {
       const insp = inspirations.find(x => x.id === b.dataset.id);
@@ -673,36 +750,74 @@ function openInspirationSheet() {
 }
 
 function openAddInspirationSheet() {
-  const html = `
-    <div class="overlay" id="ovA">
-      <div class="sheet">
-        <h3>Guardar un enlace</h3>
-        <div class="field"><label>Enlace (web, Instagram, TikTok, YouTube…)</label>
-          <input type="text" id="a-url" placeholder="https://...">
+  let extracted = { ingredients: [] };
+  let statusMsg = "";
+
+  const render = () => {
+    const html = `
+      <div class="overlay" id="ovA">
+        <div class="sheet">
+          <h3>Guardar un enlace</h3>
+          <div class="field"><label>Enlace (web, Instagram, TikTok, YouTube…)</label>
+            <input type="text" id="a-url" placeholder="https://..." value="${escapeHtml($("#a-url")?.value || "")}">
+          </div>
+          <button class="btn btn-secondary btn-block" id="a-extract" style="margin-bottom:14px;">🔍 Intentar rellenar automáticamente</button>
+          ${statusMsg ? `<div class="tip" style="margin-bottom:14px;">${statusMsg}</div>` : ""}
+          <div class="field"><label>Título (para reconocerlo luego)</label>
+            <input type="text" id="a-title" placeholder="Ej. Pollo al curry" value="${escapeHtml($("#a-title")?.value || "")}">
+          </div>
+          <div class="field"><label>Alimentos que lleva (separados por comas)</label>
+            <input type="text" id="a-tags" placeholder="pollo, arroz, curry" value="${escapeHtml($("#a-tags")?.value || "")}">
+          </div>
+          ${extracted.ingredients.length ? `
+            <div class="tip"><b>Ingredientes detectados en la web:</b><br>${extracted.ingredients.map(escapeHtml).join(", ")}</div>
+          ` : ""}
+          <div class="sheet-actions">
+            <button class="btn btn-secondary" id="a-cancel">Cancelar</button>
+            <button class="btn btn-primary" id="a-save">Guardar</button>
+          </div>
         </div>
-        <div class="field"><label>Título (para reconocerlo luego)</label>
-          <input type="text" id="a-title" placeholder="Ej. Pollo al curry de Instagram">
-        </div>
-        <div class="field"><label>Alimentos que lleva (separados por comas)</label>
-          <input type="text" id="a-tags" placeholder="pollo, arroz, curry">
-        </div>
-        <div class="sheet-actions">
-          <button class="btn btn-secondary" id="a-cancel">Cancelar</button>
-          <button class="btn btn-primary" id="a-save">Guardar</button>
-        </div>
-      </div>
-    </div>`;
-  $("#modalRoot").innerHTML = html;
-  $("#a-cancel").addEventListener("click", () => openInspirationSheet());
-  $("#ovA").addEventListener("click", e => { if (e.target.id === "ovA") openInspirationSheet(); });
-  $("#a-save").addEventListener("click", async () => {
-    const url = $("#a-url").value.trim();
-    if (!url) { $("#a-url").focus(); return; }
-    const title = $("#a-title").value.trim() || url;
-    const tags = $("#a-tags").value.split(",").map(t => t.trim()).filter(Boolean);
-    await addInspiration({ url, title, tags, source: detectSource(url).id });
-    openInspirationSheet();
-  });
+      </div>`;
+    $("#modalRoot").innerHTML = html;
+    $("#a-cancel").addEventListener("click", () => openInspirationSheet());
+    $("#ovA").addEventListener("click", e => { if (e.target.id === "ovA") openInspirationSheet(); });
+
+    $("#a-extract").addEventListener("click", async () => {
+      const url = $("#a-url").value.trim();
+      if (!url) { $("#a-url").focus(); return; }
+      $("#a-extract").textContent = "Buscando…";
+      $("#a-extract").disabled = true;
+      const result = await tryExtractRecipe(url);
+      if (result.ok) {
+        if (result.name) $("#a-title").value = result.name;
+        if (result.ingredients.length) {
+          extracted = { ingredients: result.ingredients };
+          const short = result.ingredients.slice(0, 6).map(i => i.split(",")[0].trim().toLowerCase());
+          $("#a-tags").value = Array.from(new Set(short)).join(", ");
+        }
+        statusMsg = "✅ Encontrado y rellenado. Revisa que tenga sentido antes de guardar.";
+      } else {
+        const messages = {
+          social: "⚠️ Esta red social no permite extracción automática — rellena el título y las etiquetas a mano.",
+          fetch: "⚠️ No he podido acceder a la página (puede que el servicio intermediario esté caído). Rellena a mano.",
+          "no-schema": "⚠️ Esta web no incluye la receta en un formato que pueda leer automáticamente. Rellena a mano.",
+          parse: "⚠️ La página respondió pero no he podido interpretarla. Rellena a mano."
+        };
+        statusMsg = messages[result.reason] || messages.fetch;
+      }
+      render();
+    });
+
+    $("#a-save").addEventListener("click", async () => {
+      const url = $("#a-url").value.trim();
+      if (!url) { $("#a-url").focus(); return; }
+      const title = $("#a-title").value.trim() || url;
+      const tags = $("#a-tags").value.split(",").map(t => t.trim()).filter(Boolean);
+      await addInspiration({ url, title, tags, source: detectSource(url).id, extractedIngredients: extracted.ingredients });
+      openInspirationSheet();
+    });
+  };
+  render();
 }
 
 // ==================================================================
@@ -736,7 +851,7 @@ function renderCompra() {
           <div class="checkbox ${on?"on":""}" data-id="${p.id}">${on ? "✓" : ""}</div>
           <div class="product-info">
             <div class="product-name">${escapeHtml(p.name)}</div>
-            <div class="product-meta">tienes ${fmtQty(p)} · repón a ${fmtNum(p.min)}${unitOf(p).id!=="ud" ? " "+unitOf(p).short : ""}</div>
+            <div class="product-meta">tienes ${fmtQty(p)} · repón a ${fmtNum(p.min)} ${unitOf(p).short}</div>
           </div>
         </div>`;
     });
@@ -758,7 +873,7 @@ $("#btnConfirmPurchase").addEventListener("click", () => {
     return;
   }
   openConfirm("Confirmar compra", `Se repondrán ${needed.length} producto(s) a su cantidad mínima y se guardará en el historial.`, "Confirmar", () => {
-    const items = needed.map(p => ({ name: p.name, from: p.stock, to: p.min, unit: unitOf(p).id !== "ud" ? unitOf(p).short : "" }));
+    const items = needed.map(p => ({ name: p.name, from: p.stock, to: p.min, unit: unitOf(p).short }));
     needed.forEach(p => updateProduct(p.id, { stock: p.min }));
     addHistoryEntry({ items, type: "purchase" });
     clearShoppingCheckedFor(needed.map(p => p.id));

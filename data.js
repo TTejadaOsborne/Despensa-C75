@@ -26,7 +26,7 @@ export const LOCATIONS = ["Nevera", "Despensa", "Congelador", "Otros"];
 
 // Unidad de medida por producto, con el incremento (+/-) que tiene sentido para cada una
 export const UNITS = [
-  { id: "ud",      label: "unidades",     short: "ud",     step: 1 },
+  { id: "ud",      label: "unidades",     short: "uds",    step: 1 },
   { id: "bolsa",   label: "bolsas",       short: "bolsas", step: 1 },
   { id: "bote",    label: "botes/tarros", short: "botes",  step: 1 },
   { id: "paquete", label: "paquetes",     short: "paq.",   step: 1 },
@@ -164,6 +164,7 @@ export async function addInspiration(insp) {
     url: insp.url,
     tags: insp.tags || [],
     source: insp.source || "web",
+    extractedIngredients: insp.extractedIngredients || [],
     createdAt: serverTimestamp()
   });
 }
