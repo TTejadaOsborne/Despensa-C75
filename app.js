@@ -7,6 +7,10 @@ import {
   listenInspirations, addInspiration, deleteInspiration
 } from "./data.js";
 import {
+  extractShoppingListFromPdf, matchIngredientToProduct, guessZone,
+  DEFAULT_IGNORED, isIgnoredIngredient
+} from "./pdf-import.js";
+import {
   db, doc, setDoc, onSnapshot, updateDoc
 } from "./firebase-config.js";
 
@@ -18,7 +22,7 @@ let history = [];
 let inspirations = [];
 let shoppingChecked = {}; // { productId: true }
 let selectedDayOffset = 0;
-let syncFlags = { products: false, recipes: false, menu: false, history: false, shopping: false, inspirations: false };
+let syncFlags = { products: false, recipes: false, menu: false, history: false, shopping: false, inspirations: false, settings: false };
 
 const $ = sel => document.querySelector(sel);
 const $$ = sel => Array.from(document.querySelectorAll(sel));
@@ -46,6 +50,20 @@ function clearShoppingCheckedFor(ids) {
   const next = { ...shoppingChecked };
   ids.forEach(id => delete next[id]);
   setDoc(shoppingDocRef, { checked: next }, { merge: false });
+}
+
+// ---------- Ajustes compartidos (ingredientes secundarios a ignorar al importar un menú) ----------
+let ignoredIngredients = [...DEFAULT_IGNORED];
+const settingsDocRef = doc(db, "state", "settings");
+onSnapshot(settingsDocRef, snap => {
+  if (snap.exists() && Array.isArray(snap.data().ignoredIngredients)) {
+    ignoredIngredients = snap.data().ignoredIngredients;
+  }
+  syncFlags.settings = true;
+});
+function saveIgnoredIngredients(list) {
+  ignoredIngredients = list;
+  setDoc(settingsDocRef, { ignoredIngredients: list }, { merge: true });
 }
 
 // ---------- Listeners ----------
@@ -948,6 +966,143 @@ function compressImageFile(file, maxBytes = 650000) {
 }
 
 $("#btnScanTicket").addEventListener("click", openScanTicketSheet);
+$("#btnImportMenuPdf").addEventListener("click", openImportMenuPdfSheet);
+
+// ==================================================================
+// IMPORTAR MENÚ PDF (DietoPro y similares) — vinculación automática al inventario
+// ==================================================================
+function openImportMenuPdfSheet() {
+  let parsedItems = null;   // resultado crudo del PDF
+  let reviewItems = null;   // con match + estado de "ignorar" por fila
+  let ignoredText = ignoredIngredients.join(", ");
+  let status = "";
+
+  const rebuildReview = () => {
+    const ignoredList = ignoredText.split(",").map(s => s.trim()).filter(Boolean);
+    reviewItems = parsedItems.map(it => ({
+      ...it,
+      matched: matchIngredientToProduct(it.name, products),
+      ignored: isIgnoredIngredient(it.name, ignoredList)
+    }));
+  };
+
+  const render = () => {
+    const html = `
+      <div class="overlay" id="ovP">
+        <div class="sheet">
+          <h3>Importar menú (PDF)</h3>
+          <div class="field"><label>PDF del plan dietético (ej. exportado desde DietoPro)</label>
+            <input type="file" id="p-file" accept="application/pdf">
+          </div>
+          ${status ? `<div class="tip">${status}</div>` : ""}
+          ${!reviewItems ? `
+            <button class="btn btn-primary btn-block" id="p-analyze" style="margin-top:6px;">Analizar PDF</button>
+          ` : `
+            <div class="field"><label>Ingredientes secundarios a ignorar (separados por comas)</label>
+              <input type="text" id="p-ignored" value="${escapeHtml(ignoredText)}">
+            </div>
+            <div style="font-size:12px;color:var(--text-soft);margin-bottom:10px;">
+              ${reviewItems.filter(i=>i.matched).length} ya en tu inventario ·
+              ${reviewItems.filter(i=>!i.matched && !i.ignored).length} para añadir ·
+              ${reviewItems.filter(i=>i.ignored).length} ignorados
+            </div>
+            <div id="p-list">
+              ${reviewItems.map((it, i) => `
+                <div class="shop-row ${it.ignored ? "checked" : ""}">
+                  <div class="checkbox ${it.ignored ? "on" : ""}" data-ignore-idx="${i}">${it.ignored ? "✓" : ""}</div>
+                  <div class="product-info">
+                    <div class="product-name">${escapeHtml(it.name)}</div>
+                    <div class="product-meta">
+                      ${fmtNum(it.qty)}${it.unit} · ${escapeHtml(it.category)}
+                      ${it.matched
+                        ? `<span class="chip" style="background:var(--primary);color:white;">✓ ${escapeHtml(it.matched.name)}</span>`
+                        : it.ignored ? `<span class="chip">ignorado</span>` : `<span class="chip" style="background:var(--accent);color:white;">añadir</span>`}
+                    </div>
+                  </div>
+                </div>`).join("")}
+            </div>
+          `}
+          <div class="sheet-actions" style="margin-top:14px;">
+            <button class="btn btn-secondary" id="p-cancel">Cancelar</button>
+            ${reviewItems ? `<button class="btn btn-primary" id="p-confirm">Añadir los que faltan</button>` : ""}
+          </div>
+        </div>
+      </div>`;
+    $("#modalRoot").innerHTML = html;
+    $("#p-cancel").addEventListener("click", closeSheet);
+    $("#ovP").addEventListener("click", e => { if (e.target.id === "ovP") closeSheet(); });
+
+    $("#p-analyze")?.addEventListener("click", async () => {
+      const file = $("#p-file").files[0];
+      if (!file) { status = "⚠️ Elige antes un fichero PDF."; render(); return; }
+      status = "Analizando PDF…";
+      render();
+      try {
+        const buf = await file.arrayBuffer();
+        const result = await extractShoppingListFromPdf(buf);
+        if (!result.ok || result.items.length === 0) {
+          const msgs = {
+            "no-list-page": "No encuentro una página \"LISTA DE LA COMPRA\" en este PDF. ¿Es un export de DietoPro? Con otro formato puede no funcionar.",
+            "parse-empty": "Encontré la página pero no pude leer los productos — el diseño puede haber cambiado. Dímelo y lo reviso."
+          };
+          status = "⚠️ " + (msgs[result.reason] || "No he podido leer el PDF.");
+          parsedItems = null; reviewItems = null;
+          render();
+          return;
+        }
+        parsedItems = result.items;
+        status = `✅ Encontrados ${parsedItems.length} productos en la página ${result.page}. Revisa antes de confirmar.`;
+        rebuildReview();
+      } catch (e) {
+        status = "⚠️ Error leyendo el PDF: " + (e.message || e);
+        parsedItems = null; reviewItems = null;
+      }
+      render();
+    });
+
+    $("#p-ignored")?.addEventListener("input", e => {
+      ignoredText = e.target.value;
+      rebuildReview();
+      render();
+    });
+
+    $$('[data-ignore-idx]').forEach(box => {
+      box.addEventListener("click", () => {
+        const idx = Number(box.dataset.ignoreIdx);
+        reviewItems[idx].ignored = !reviewItems[idx].ignored;
+        render();
+      });
+    });
+
+    $("#p-confirm")?.addEventListener("click", () => {
+      const toAdd = reviewItems.filter(it => !it.matched && !it.ignored);
+      const ignoredList = ignoredText.split(",").map(s => s.trim()).filter(Boolean);
+      saveIgnoredIngredients(ignoredList);
+      openConfirm(
+        "Añadir al inventario",
+        `Se crearán ${toAdd.length} producto(s) nuevo(s), con stock 0 y el mínimo puesto a lo que indica el menú — así entran directos en tu lista de la compra.`,
+        "Añadir",
+        () => {
+          toAdd.forEach(it => {
+            addProduct({
+              name: it.name.charAt(0).toUpperCase() + it.name.slice(1),
+              zone: guessZone(it.category),
+              location: "Despensa",
+              unit: it.unit,
+              stock: 0,
+              min: it.qty || 1,
+              trackShopping: true,
+              note: "Importado del menú del nutricionista"
+            });
+          });
+          closeSheet();
+        }
+      );
+    });
+  };
+  render();
+}
+
 
 function openScanTicketSheet() {
   let photoData = null;
