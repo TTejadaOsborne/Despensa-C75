@@ -136,8 +136,8 @@ function renderInventario() {
     byLocation[loc].forEach(p => {
       const marked = needsRestock(p);
       html += `
-        <div class="product-row compact ${marked ? "low" : ""}" data-id="${p.id}">
-          <button class="cart-toggle ${marked ? "on" : ""}" data-cart="${p.id}" title="Marcar para comprar">🛒</button>
+        <div class="product-row compact" data-id="${p.id}">
+          <div class="checkbox ${marked ? "on" : ""}" data-cart="${p.id}" title="Marcar para comprar">${marked ? "✓" : ""}</div>
           <div class="product-info">
             <div class="product-name">${escapeHtml(p.name)}</div>
             <div class="product-meta">
