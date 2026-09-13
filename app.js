@@ -121,7 +121,13 @@ function renderInventario() {
       const marked = needsRestock(p);
       html += `
         <div class="product-row compact" data-id="${p.id}">
-          <div class="checkbox ${marked ? "on" : ""}" data-cart="${p.id}" title="Marcar para comprar">${marked ? "✓" : ""}</div>
+          <button class="cart-toggle ${marked ? "on" : ""}" data-cart="${p.id}" title="Marcar para comprar">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="9" cy="20" r="1.4" fill="currentColor" stroke="none"/>
+              <circle cx="18" cy="20" r="1.4" fill="currentColor" stroke="none"/>
+              <path d="M2.5 3h2.2l1.9 11.4a2 2 0 0 0 2 1.6h8.6a2 2 0 0 0 2-1.6l1.4-7.4H6.1"/>
+            </svg>
+          </button>
           <div class="product-info">
             <div class="product-name">${escapeHtml(p.name)}</div>
             <div class="product-meta">
@@ -443,8 +449,16 @@ function openRecipesSheet() {
 
 function openRecipeEditor(recipe, onSaved) {
   const editing = !!(recipe && recipe.id);
-  const ingredients = recipe ? [...(recipe.ingredients||[])] : [];
+  const initial = recipe ? [...(recipe.ingredients||[])] : [];
+  const linkedAmounts = {}; // productId -> amount
+  initial.filter(i => i.productId).forEach(i => { linkedAmounts[i.productId] = i.amount ?? ""; });
+  const extras = initial.filter(i => !i.productId).map(i => i.name);
+  let filterText = "";
+
   const render = () => {
+    const filtered = products
+      .filter(p => p.name.toLowerCase().includes(filterText.toLowerCase()))
+      .sort((a, b) => a.name.localeCompare(b.name, "es"));
     const html = `
       <div class="overlay" id="ov2">
         <div class="sheet">
@@ -453,28 +467,27 @@ function openRecipeEditor(recipe, onSaved) {
           <div class="field"><label>Enlace a la receta original (opcional)</label>
             <input type="text" id="re-url" value="${escapeHtml(recipe?.url||"")}" placeholder="https://...">
           </div>
-          <div class="field"><label>Ingredientes (el nombre es libre; vincúlalo a un producto y pon la cantidad en su misma unidad para ver cómo queda el stock al cocinar)</label>
-            <div id="ingRows">
-              ${ingredients.map((ing, i) => {
-                const linkedUnit = ing.productId ? unitOf(products.find(p => p.id === ing.productId) || {}).short : "";
-                return `
-                <div class="ing-row-full" data-i="${i}">
-                  <div style="display:flex;gap:8px;margin-bottom:4px;">
-                    <input type="text" data-f="name" placeholder="Ej. Pechuga de pollo" value="${escapeHtml(ing.name||"")}" style="flex:1;">
-                    <button data-act="rm-ing" data-i="${i}" style="background:none;border:none;color:var(--danger);font-size:18px;">×</button>
-                  </div>
-                  <div class="ing-row" data-i="${i}" style="margin-bottom:10px;">
-                    <select data-f="productId">
-                      <option value="">— Sin vincular a producto —</option>
-                      ${products.map(p => `<option value="${p.id}" ${ing.productId===p.id?"selected":""}>${escapeHtml(p.name)}</option>`).join("")}
-                    </select>
-                    <input type="number" step="any" min="0" data-f="amount" placeholder="Cantidad" value="${ing.amount ?? ""}" style="flex:0 0 90px;" ${ing.productId ? "" : "disabled"}>
-                    <span class="ing-unit">${escapeHtml(linkedUnit)}</span>
-                  </div>
-                </div>`;
-              }).join("")}
+          <div class="field"><label>Ingredientes de tu despensa — pon la cantidad que necesita la receta, en la misma unidad del producto</label>
+            <input type="text" id="re-filter" placeholder="Buscar producto…" value="${escapeHtml(filterText)}" style="margin-bottom:10px;">
+          </div>
+          <div id="ingPicker" style="max-height:260px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-s);margin-bottom:14px;">
+            ${filtered.length === 0 ? `<div style="padding:14px;font-size:13px;color:var(--text-soft);">Sin productos que coincidan.</div>` : filtered.map(p => `
+              <div class="pick-row" data-pid="${p.id}">
+                <div class="pick-name">${escapeHtml(p.name)}<span class="chip" style="margin-left:6px;">${escapeHtml(p.zone)}</span></div>
+                <input type="number" step="any" min="0" data-pid-amount="${p.id}" placeholder="0" value="${linkedAmounts[p.id] ?? ""}">
+                <span class="ing-unit">${escapeHtml(unitOf(p).short)}</span>
+              </div>`).join("")}
+          </div>
+          <div class="field">
+            <label>Otros ingredientes sin vincular (opcional — no cuentan para el stock)</label>
+            <div id="extraRows">
+              ${extras.map((name, i) => `
+                <div class="ing-row" data-ei="${i}" style="margin-bottom:8px;">
+                  <input type="text" data-ef="name" placeholder="Ej. sal al gusto" value="${escapeHtml(name)}" style="flex:1;">
+                  <button data-act="rm-extra" data-ei="${i}" style="background:none;border:none;color:var(--danger);font-size:18px;">×</button>
+                </div>`).join("")}
             </div>
-            <button class="mini-link" id="re-addIng">+ Añadir ingrediente</button>
+            <button class="mini-link" id="re-addExtra">+ Añadir ingrediente suelto</button>
           </div>
           <div class="field"><label>Notas / pasos (opcional)</label><textarea id="re-notes">${escapeHtml(recipe?.notes||"")}</textarea></div>
           <div class="sheet-actions">
@@ -487,28 +500,26 @@ function openRecipeEditor(recipe, onSaved) {
     $("#modalRoot").innerHTML = html;
     $("#re-cancel").addEventListener("click", closeSheet);
     $("#ov2").addEventListener("click", e => { if (e.target.id === "ov2") closeSheet(); });
-    $("#re-addIng").addEventListener("click", () => { ingredients.push({ productId: "", name: "", amount: null }); render(); });
-    $$('[data-act="rm-ing"]').forEach(b => b.addEventListener("click", () => { ingredients.splice(Number(b.dataset.i), 1); render(); }));
-    $$('.ing-row-full').forEach(row => {
-      row.querySelectorAll('[data-f="name"]').forEach(inp => {
-        inp.addEventListener("change", () => { ingredients[Number(row.dataset.i)].name = inp.value; });
+
+    $("#re-filter").addEventListener("input", e => { filterText = e.target.value; render(); });
+    // Reponer el foco y el cursor en el buscador tras cada render (se pierde al regenerar el HTML)
+    const fInput = $("#re-filter");
+    fInput.focus();
+    fInput.selectionStart = fInput.selectionEnd = fInput.value.length;
+
+    $$('[data-pid-amount]').forEach(inp => {
+      inp.addEventListener("change", () => {
+        const pid = inp.dataset.pidAmount;
+        linkedAmounts[pid] = inp.value === "" ? "" : Number(inp.value);
       });
     });
-    $$('.ing-row').forEach(row => {
-      row.querySelectorAll("[data-f]").forEach(inp => {
-        inp.addEventListener("change", () => {
-          const i = Number(row.dataset.i);
-          ingredients[i][inp.dataset.f] = inp.dataset.f === "amount" ? (inp.value === "" ? null : Number(inp.value)) : inp.value;
-          if (inp.dataset.f === "productId") {
-            if (!ingredients[i].name) {
-              const prod = products.find(p => p.id === inp.value);
-              ingredients[i].name = prod ? prod.name : "";
-            }
-            render();
-          }
-        });
-      });
+
+    $("#re-addExtra").addEventListener("click", () => { extras.push(""); render(); });
+    $$('[data-act="rm-extra"]').forEach(b => b.addEventListener("click", () => { extras.splice(Number(b.dataset.ei), 1); render(); }));
+    $$('#extraRows [data-ef="name"]').forEach(inp => {
+      inp.addEventListener("change", () => { extras[Number(inp.closest("[data-ei]").dataset.ei)] = inp.value; });
     });
+
     if (editing) {
       $("#re-delete").addEventListener("click", () => {
         openConfirm("Eliminar receta", `¿Eliminar "${recipe.name}"? Los días de menú que la usan quedarán vacíos.`, "Eliminar", () => {
@@ -520,7 +531,14 @@ function openRecipeEditor(recipe, onSaved) {
     $("#re-save").addEventListener("click", async () => {
       const name = $("#re-name").value.trim();
       if (!name) { $("#re-name").focus(); return; }
-      const cleanIng = ingredients.filter(i => (i.name && i.name.trim()) || i.productId).map(i => ({ productId: i.productId||"", name: i.name||"", amount: i.productId ? (Number(i.amount)||0) : null }));
+      const linked = Object.entries(linkedAmounts)
+        .filter(([, amt]) => amt !== "" && amt != null && Number(amt) > 0)
+        .map(([pid, amt]) => {
+          const p = products.find(x => x.id === pid);
+          return { productId: pid, name: p ? p.name : "", amount: Number(amt) };
+        });
+      const extraIng = extras.filter(n => n && n.trim()).map(n => ({ productId: "", name: n.trim(), amount: null }));
+      const cleanIng = [...linked, ...extraIng];
       const url = $("#re-url").value.trim();
       const patch = { name, ingredients: cleanIng, notes: $("#re-notes").value.trim(), url };
       if (editing) {
