@@ -38,8 +38,9 @@ export const UNITS = [
 export const UNIT_MAP = Object.fromEntries(UNITS.map(u => [u.id, u]));
 
 export const MEAL_SLOTS = [
-  { id: "comida", label: "Comida" },
-  { id: "cena", label: "Cena" }
+  { id: "desayuno", label: "Desayuno", color: "#E8A33D" },
+  { id: "comida", label: "Comida", color: "#2F5233" },
+  { id: "cena", label: "Cena", color: "#4A5C8A" }
 ];
 
 const productsCol = collection(db, "products");

@@ -7,8 +7,7 @@ import {
   listenInspirations, addInspiration, deleteInspiration
 } from "./data.js";
 import {
-  extractShoppingListFromPdf, extractWeeklyMenuFromPdf, matchIngredientToProduct, guessZone,
-  DEFAULT_IGNORED, isIgnoredIngredient
+  extractWeeklyMenuFromPdf
 } from "./pdf-import.js";
 import {
   db, doc, setDoc, onSnapshot, updateDoc
@@ -23,7 +22,7 @@ let inspirations = [];
 let shoppingChecked = {}; // { productId: true }
 let selectedDayOffset = 0;
 let selectedLocation = "Todas";
-let syncFlags = { products: false, recipes: false, menu: false, history: false, shopping: false, inspirations: false, settings: false };
+let syncFlags = { products: false, recipes: false, menu: false, history: false, shopping: false, inspirations: false };
 
 const $ = sel => document.querySelector(sel);
 const $$ = sel => Array.from(document.querySelectorAll(sel));
@@ -49,20 +48,6 @@ function clearShoppingCheckedFor(ids) {
   const next = { ...shoppingChecked };
   ids.forEach(id => delete next[id]);
   setDoc(shoppingDocRef, { checked: next }, { merge: false });
-}
-
-// ---------- Ajustes compartidos (ingredientes secundarios a ignorar al importar un menú) ----------
-let ignoredIngredients = [...DEFAULT_IGNORED];
-const settingsDocRef = doc(db, "state", "settings");
-onSnapshot(settingsDocRef, snap => {
-  if (snap.exists() && Array.isArray(snap.data().ignoredIngredients)) {
-    ignoredIngredients = snap.data().ignoredIngredients;
-  }
-  syncFlags.settings = true;
-});
-function saveIgnoredIngredients(list) {
-  ignoredIngredients = list;
-  setDoc(settingsDocRef, { ignoredIngredients: list }, { merge: true });
 }
 
 // ---------- Listeners ----------
@@ -301,15 +286,36 @@ function renderMenu() {
   MEAL_SLOTS.forEach(slot => {
     const meal = dayData[slot.id];
     const name = meal ? (meal.recipeName || meal.freeText) : null;
-    const frostItems = meal && meal.recipeId ? frostWarningsFor(meal.recipeId) : [];
+    const recipe = meal && meal.recipeId ? recipes.find(r => r.id === meal.recipeId) : null;
+    const linkedIng = recipe ? (recipe.ingredients || []).filter(i => i.productId && i.amount != null) : [];
+    const frostItems = recipe ? frostWarningsFor(recipe.id) : [];
     html += `
       <div class="meal-card" data-slot="${slot.id}">
-        <div class="slot-label">${slot.label}</div>
-        <div class="meal-name">${name ? escapeHtml(name) : `<span class="meal-empty">Sin planificar</span>`}</div>
-        ${frostItems.length ? `<div class="frost-note">❄️ Sacar del congelador: ${frostItems.map(escapeHtml).join(", ")}</div>` : ""}
-        <div class="meal-actions">
-          <button class="btn btn-secondary" data-act="edit-meal" data-slot="${slot.id}">${name ? "Cambiar" : "Planificar"}</button>
-          ${name ? `<button class="btn btn-secondary" data-act="clear-meal" data-slot="${slot.id}">Quitar</button>` : ""}
+        <div class="slot-band" style="background:${slot.color};">${slot.label}</div>
+        <div class="meal-card-body">
+          <div class="meal-name">${name ? escapeHtml(name) : `<span class="meal-empty">Sin planificar</span>`}</div>
+          ${frostItems.length ? `<div class="frost-note">❄️ Sacar del congelador: ${frostItems.map(escapeHtml).join(", ")}</div>` : ""}
+          ${linkedIng.length ? `
+            <table class="ing-table">
+              ${linkedIng.map(ing => {
+                const p = products.find(x => x.id === ing.productId);
+                if (!p) return "";
+                const after = Math.round((p.stock - ing.amount + Number.EPSILON) * 100) / 100;
+                const u = unitOf(p).short;
+                return `<tr>
+                  <td>${escapeHtml(p.name)}</td>
+                  <td class="ing-need">−${fmtNum(ing.amount)} ${u}</td>
+                  <td>tienes ${fmtNum(p.stock)}</td>
+                  <td class="${after < 0 ? "ing-after-neg" : "ing-after"}">quedaría ${fmtNum(after)} ${u}</td>
+                </tr>`;
+              }).join("")}
+            </table>
+          ` : ""}
+          <div class="meal-actions">
+            <button class="btn btn-secondary" data-act="edit-meal" data-slot="${slot.id}">${name ? "Cambiar" : "Planificar"}</button>
+            ${name ? `<button class="btn btn-secondary" data-act="clear-meal" data-slot="${slot.id}">Quitar</button>` : ""}
+            ${linkedIng.length ? `<button class="btn btn-primary" data-act="cook-meal" data-slot="${slot.id}">🍳 Cocinar</button>` : ""}
+          </div>
         </div>
       </div>`;
   });
@@ -321,6 +327,33 @@ function renderMenu() {
   $("#btnImportWeek")?.addEventListener("click", () => openImportWeekSheet());
   $$('[data-act="edit-meal"]').forEach(b => b.addEventListener("click", () => openMealSheet(dateStr, b.dataset.slot)));
   $$('[data-act="clear-meal"]').forEach(b => b.addEventListener("click", () => clearMealSlot(dateStr, b.dataset.slot)));
+  $$('[data-act="cook-meal"]').forEach(b => b.addEventListener("click", () => cookMeal(dateStr, b.dataset.slot)));
+}
+
+function cookMeal(dateStr, slotId) {
+  const meal = (menuByDate[dateStr] || {})[slotId];
+  const recipe = meal && meal.recipeId ? recipes.find(r => r.id === meal.recipeId) : null;
+  if (!recipe) return;
+  const linkedIng = (recipe.ingredients || []).filter(i => i.productId && i.amount != null);
+  if (linkedIng.length === 0) return;
+  const willGoNegative = linkedIng.some(ing => {
+    const p = products.find(x => x.id === ing.productId);
+    return p && (p.stock - ing.amount) < 0;
+  });
+  openConfirm(
+    "Cocinar " + recipe.name,
+    `Se restará de tu inventario lo que usa esta receta.${willGoNegative ? " Ojo: algún ingrediente se quedará por debajo de 0 — parece que no tenías suficiente." : ""}`,
+    "Cocinar",
+    () => {
+      linkedIng.forEach(ing => {
+        const p = products.find(x => x.id === ing.productId);
+        if (!p) return;
+        const next = Math.round((p.stock - ing.amount + Number.EPSILON) * 100) / 100;
+        updateProduct(p.id, { stock: next });
+      });
+      closeSheet();
+    }
+  );
 }
 
 function frostWarningsFor(recipeId) {
@@ -411,7 +444,6 @@ function openRecipesSheet() {
 function openRecipeEditor(recipe, onSaved) {
   const editing = !!(recipe && recipe.id);
   const ingredients = recipe ? [...(recipe.ingredients||[])] : [];
-  let showPaste = false;
   const render = () => {
     const html = `
       <div class="overlay" id="ov2">
@@ -421,20 +453,14 @@ function openRecipeEditor(recipe, onSaved) {
           <div class="field"><label>Enlace a la receta original (opcional)</label>
             <input type="text" id="re-url" value="${escapeHtml(recipe?.url||"")}" placeholder="https://...">
           </div>
-          <button class="mini-link" id="re-togglePaste" style="margin-bottom:10px;">${showPaste ? "− Ocultar pegado" : "🧾 Pegar receta desde web/Instagram"}</button>
-          ${showPaste ? `
-            <div class="field">
-              <label>Pega aquí el texto de la receta (ingredientes y pasos, tal cual los copiaste)</label>
-              <textarea id="re-paste" style="min-height:100px;" placeholder="200 g de pollo&#10;1 cebolla&#10;2 cucharadas de aceite&#10;Sofríe la cebolla...&#10;Añade el pollo y cocina 10 min"></textarea>
-            </div>
-            <button class="btn btn-secondary btn-block" id="re-detect" style="margin-bottom:14px;">Detectar ingredientes y pasos</button>
-          ` : ""}
-          <div class="field"><label>Ingredientes (el nombre es libre; vincúlalo a un producto solo si quieres que cuente para el stock y los avisos de descongelado)</label>
+          <div class="field"><label>Ingredientes (el nombre es libre; vincúlalo a un producto y pon la cantidad en su misma unidad para ver cómo queda el stock al cocinar)</label>
             <div id="ingRows">
-              ${ingredients.map((ing, i) => `
+              ${ingredients.map((ing, i) => {
+                const linkedUnit = ing.productId ? unitOf(products.find(p => p.id === ing.productId) || {}).short : "";
+                return `
                 <div class="ing-row-full" data-i="${i}">
                   <div style="display:flex;gap:8px;margin-bottom:4px;">
-                    <input type="text" data-f="name" placeholder="Ej. 200 g de pollo" value="${escapeHtml(ing.name||"")}" style="flex:1;">
+                    <input type="text" data-f="name" placeholder="Ej. Pechuga de pollo" value="${escapeHtml(ing.name||"")}" style="flex:1;">
                     <button data-act="rm-ing" data-i="${i}" style="background:none;border:none;color:var(--danger);font-size:18px;">×</button>
                   </div>
                   <div class="ing-row" data-i="${i}" style="margin-bottom:10px;">
@@ -442,9 +468,11 @@ function openRecipeEditor(recipe, onSaved) {
                       <option value="">— Sin vincular a producto —</option>
                       ${products.map(p => `<option value="${p.id}" ${ing.productId===p.id?"selected":""}>${escapeHtml(p.name)}</option>`).join("")}
                     </select>
-                    <input type="text" data-f="qty" placeholder="Cantidad" value="${escapeHtml(ing.qty||"")}">
+                    <input type="number" step="any" min="0" data-f="amount" placeholder="Cantidad" value="${ing.amount ?? ""}" style="flex:0 0 90px;" ${ing.productId ? "" : "disabled"}>
+                    <span class="ing-unit">${escapeHtml(linkedUnit)}</span>
                   </div>
-                </div>`).join("")}
+                </div>`;
+              }).join("")}
             </div>
             <button class="mini-link" id="re-addIng">+ Añadir ingrediente</button>
           </div>
@@ -459,23 +487,7 @@ function openRecipeEditor(recipe, onSaved) {
     $("#modalRoot").innerHTML = html;
     $("#re-cancel").addEventListener("click", closeSheet);
     $("#ov2").addEventListener("click", e => { if (e.target.id === "ov2") closeSheet(); });
-    $("#re-togglePaste").addEventListener("click", () => { showPaste = !showPaste; render(); });
-    $("#re-detect")?.addEventListener("click", () => {
-      const text = $("#re-paste").value;
-      const { parsedIngredients, steps } = parseRecipeText(text);
-      parsedIngredients.forEach(pi => {
-        const match = products.find(p => pi.name.toLowerCase().includes(p.name.toLowerCase()) || p.name.toLowerCase().includes(pi.name.toLowerCase()));
-        ingredients.push({ productId: match ? match.id : "", name: pi.name, qty: pi.qty });
-      });
-      if (steps.length) {
-        const notesField = $("#re-notes");
-        const prev = notesField.value.trim();
-        notesField.value = (prev ? prev + "\n\n" : "") + "Pasos:\n" + steps.join("\n");
-      }
-      showPaste = false;
-      render();
-    });
-    $("#re-addIng").addEventListener("click", () => { ingredients.push({ productId: "", name: "", qty: "" }); render(); });
+    $("#re-addIng").addEventListener("click", () => { ingredients.push({ productId: "", name: "", amount: null }); render(); });
     $$('[data-act="rm-ing"]').forEach(b => b.addEventListener("click", () => { ingredients.splice(Number(b.dataset.i), 1); render(); }));
     $$('.ing-row-full').forEach(row => {
       row.querySelectorAll('[data-f="name"]').forEach(inp => {
@@ -486,10 +498,13 @@ function openRecipeEditor(recipe, onSaved) {
       row.querySelectorAll("[data-f]").forEach(inp => {
         inp.addEventListener("change", () => {
           const i = Number(row.dataset.i);
-          ingredients[i][inp.dataset.f] = inp.value;
-          if (inp.dataset.f === "productId" && !ingredients[i].name) {
-            const prod = products.find(p => p.id === inp.value);
-            ingredients[i].name = prod ? prod.name : "";
+          ingredients[i][inp.dataset.f] = inp.dataset.f === "amount" ? (inp.value === "" ? null : Number(inp.value)) : inp.value;
+          if (inp.dataset.f === "productId") {
+            if (!ingredients[i].name) {
+              const prod = products.find(p => p.id === inp.value);
+              ingredients[i].name = prod ? prod.name : "";
+            }
+            render();
           }
         });
       });
@@ -505,7 +520,7 @@ function openRecipeEditor(recipe, onSaved) {
     $("#re-save").addEventListener("click", async () => {
       const name = $("#re-name").value.trim();
       if (!name) { $("#re-name").focus(); return; }
-      const cleanIng = ingredients.filter(i => (i.name && i.name.trim()) || i.productId).map(i => ({ productId: i.productId||"", name: i.name||"", qty: i.qty||"" }));
+      const cleanIng = ingredients.filter(i => (i.name && i.name.trim()) || i.productId).map(i => ({ productId: i.productId||"", name: i.name||"", amount: i.productId ? (Number(i.amount)||0) : null }));
       const url = $("#re-url").value.trim();
       const patch = { name, ingredients: cleanIng, notes: $("#re-notes").value.trim(), url };
       if (editing) {
@@ -562,7 +577,7 @@ function openImportWeekSheet() {
           ${!parsedDays ? `
             <button class="btn btn-primary btn-block" id="w-analyze" style="margin-top:6px;">Analizar PDF</button>
           ` : `
-            <div style="font-size:12px;color:var(--text-soft);margin-bottom:10px;">Revisa y corrige antes de confirmar. Solo se importan Comida y Cena.</div>
+            <div style="font-size:12px;color:var(--text-soft);margin-bottom:10px;">Revisa y corrige antes de confirmar.</div>
             <div id="w-list">
               ${parsedDays.map((d, i) => {
                 const date = new Date(startDate + "T00:00:00");
@@ -571,6 +586,7 @@ function openImportWeekSheet() {
                 return `
                 <div class="meal-card">
                   <div class="slot-label">Día ${d.dayNum} — ${label}</div>
+                  <div class="field" style="margin-bottom:8px;"><label>Desayuno</label><input type="text" data-day="${i}" data-slot="desayuno" value="${escapeHtml(d.desayuno||"")}"></div>
                   <div class="field" style="margin-bottom:8px;"><label>Comida</label><input type="text" data-day="${i}" data-slot="comida" value="${escapeHtml(d.comida)}"></div>
                   <div class="field" style="margin-bottom:0;"><label>Cena</label><input type="text" data-day="${i}" data-slot="cena" value="${escapeHtml(d.cena)}"></div>
                 </div>`;
@@ -623,6 +639,7 @@ function openImportWeekSheet() {
           const date = new Date(startDate + "T00:00:00");
           date.setDate(date.getDate() + i);
           const dateStr = date.toISOString().slice(0, 10);
+          if (d.desayuno) setMealSlot(dateStr, "desayuno", { recipeId: null, freeText: d.desayuno });
           if (d.comida) setMealSlot(dateStr, "comida", { recipeId: null, freeText: d.comida });
           if (d.cena) setMealSlot(dateStr, "cena", { recipeId: null, freeText: d.cena });
         });
@@ -651,6 +668,7 @@ function openSuggestionsSheet() {
           ${s.missing.length ? `<div style="font-size:12px;color:var(--text-soft);">Falta: ${s.missing.map(escapeHtml).join(", ")}</div>` : ""}
         </div>
         <div style="display:flex;flex-direction:column;gap:6px;">
+          <button class="btn btn-secondary" data-act="sug-slot" data-rid="${s.recipe.id}" data-slot="desayuno" style="padding:8px 10px;font-size:12.5px;">Desayuno</button>
           <button class="btn btn-secondary" data-act="sug-slot" data-rid="${s.recipe.id}" data-slot="comida" style="padding:8px 10px;font-size:12.5px;">Comida</button>
           <button class="btn btn-secondary" data-act="sug-slot" data-rid="${s.recipe.id}" data-slot="cena" style="padding:8px 10px;font-size:12.5px;">Cena</button>
         </div>
@@ -959,283 +977,6 @@ $("#btnWhatsapp").addEventListener("click", () => {
   });
   window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
 });
-
-// ==================================================================
-// ESCANEAR TICKET (foto + texto pegado desde Live Text del iPhone)
-// ==================================================================
-const TICKET_IGNORE = /total|subtotal|\biva\b|tarjeta|efectivo|cambio|fecha|hora|ticket|cif|operaci[oó]n|gracias|mercadona|n\.?\s?factura|autorizaci[oó]n|contactless|bizum|c[oó]digo|art[ií]culos|importe|descuento\s*total/i;
-
-function parseTicketText(text) {
-  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
-  const priceRe = /(\d{1,3}(?:[.,]\d{2}))\s*€?\s*$/;
-  const items = [];
-  lines.forEach(line => {
-    if (TICKET_IGNORE.test(line)) return;
-    const m = line.match(priceRe);
-    if (!m) return;
-    const priceStr = m[1].replace(".", ",");
-    let name = line.slice(0, m.index).trim();
-    name = name.replace(/^\d+\s*(x|ud\.?|uds\.?)?\s*/i, "").trim();
-    if (name.length < 2) return;
-    items.push({ name, price: priceStr });
-  });
-  return items;
-}
-
-function compressImageFile(file, maxBytes = 650000) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    const reader = new FileReader();
-    reader.onload = () => { img.src = reader.result; };
-    reader.onerror = reject;
-    img.onload = () => {
-      let width = img.width, height = img.height;
-      const maxDim = 1100;
-      if (width > maxDim || height > maxDim) {
-        const scale = maxDim / Math.max(width, height);
-        width = Math.round(width * scale);
-        height = Math.round(height * scale);
-      }
-      const canvas = document.createElement("canvas");
-      canvas.width = width; canvas.height = height;
-      canvas.getContext("2d").drawImage(img, 0, 0, width, height);
-      let quality = 0.75;
-      let dataUrl = canvas.toDataURL("image/jpeg", quality);
-      while (dataUrl.length > maxBytes && quality > 0.25) {
-        quality -= 0.1;
-        dataUrl = canvas.toDataURL("image/jpeg", quality);
-      }
-      resolve(dataUrl);
-    };
-    img.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
-$("#btnScanTicket").addEventListener("click", openScanTicketSheet);
-$("#btnImportMenuPdf").addEventListener("click", openImportMenuPdfSheet);
-
-// ==================================================================
-// IMPORTAR MENÚ PDF (DietoPro y similares) — vinculación automática al inventario
-// ==================================================================
-function openImportMenuPdfSheet() {
-  let parsedItems = null;   // resultado crudo del PDF
-  let reviewItems = null;   // con match + estado de "ignorar" por fila
-  let ignoredText = ignoredIngredients.join(", ");
-  let status = "";
-
-  const rebuildReview = () => {
-    const ignoredList = ignoredText.split(",").map(s => s.trim()).filter(Boolean);
-    reviewItems = parsedItems.map(it => ({
-      ...it,
-      matched: matchIngredientToProduct(it.name, products),
-      ignored: isIgnoredIngredient(it.name, ignoredList)
-    }));
-  };
-
-  const render = () => {
-    const html = `
-      <div class="overlay" id="ovP">
-        <div class="sheet">
-          <h3>Importar menú (PDF)</h3>
-          <div class="field"><label>PDF del plan dietético (ej. exportado desde DietoPro)</label>
-            <input type="file" id="p-file" accept="application/pdf">
-          </div>
-          ${status ? `<div class="tip">${status}</div>` : ""}
-          ${!reviewItems ? `
-            <button class="btn btn-primary btn-block" id="p-analyze" style="margin-top:6px;">Analizar PDF</button>
-          ` : `
-            <div class="field"><label>Ingredientes secundarios a ignorar (separados por comas)</label>
-              <input type="text" id="p-ignored" value="${escapeHtml(ignoredText)}">
-            </div>
-            <div style="font-size:12px;color:var(--text-soft);margin-bottom:10px;">
-              ${reviewItems.filter(i=>i.matched).length} ya en tu inventario ·
-              ${reviewItems.filter(i=>!i.matched && !i.ignored).length} para añadir ·
-              ${reviewItems.filter(i=>i.ignored).length} ignorados
-            </div>
-            <div id="p-list">
-              ${reviewItems.map((it, i) => `
-                <div class="shop-row ${it.ignored ? "checked" : ""}">
-                  <div class="checkbox ${it.ignored ? "on" : ""}" data-ignore-idx="${i}">${it.ignored ? "✓" : ""}</div>
-                  <div class="product-info">
-                    <div class="product-name">${escapeHtml(it.name)}</div>
-                    <div class="product-meta">
-                      ${fmtNum(it.qty)}${it.unit} · ${escapeHtml(it.category)}
-                      ${it.matched
-                        ? `<span class="chip" style="background:var(--primary);color:white;">✓ ${escapeHtml(it.matched.name)}</span>`
-                        : it.ignored ? `<span class="chip">ignorado</span>` : `<span class="chip" style="background:var(--accent);color:white;">añadir</span>`}
-                    </div>
-                  </div>
-                </div>`).join("")}
-            </div>
-          `}
-          <div class="sheet-actions" style="margin-top:14px;">
-            <button class="btn btn-secondary" id="p-cancel">Cancelar</button>
-            ${reviewItems ? `<button class="btn btn-primary" id="p-confirm">Añadir los que faltan</button>` : ""}
-          </div>
-        </div>
-      </div>`;
-    $("#modalRoot").innerHTML = html;
-    $("#p-cancel").addEventListener("click", closeSheet);
-    $("#ovP").addEventListener("click", e => { if (e.target.id === "ovP") closeSheet(); });
-
-    $("#p-analyze")?.addEventListener("click", async () => {
-      const file = $("#p-file").files[0];
-      if (!file) { status = "⚠️ Elige antes un fichero PDF."; render(); return; }
-      status = "Analizando PDF…";
-      render();
-      try {
-        const buf = await file.arrayBuffer();
-        const result = await extractShoppingListFromPdf(buf);
-        if (!result.ok || result.items.length === 0) {
-          const msgs = {
-            "no-list-page": "No encuentro una página \"LISTA DE LA COMPRA\" en este PDF. ¿Es un export de DietoPro? Con otro formato puede no funcionar.",
-            "parse-empty": "Encontré la página pero no pude leer los productos — el diseño puede haber cambiado."
-          };
-          status = "⚠️ " + (msgs[result.reason] || "No he podido leer el PDF.");
-          if (result.debugLines) {
-            window.__lastPdfDebug = result.debugLines.join("\n");
-            status += ` <button class="mini-link" id="p-showDebug" style="display:block;margin-top:6px;">Ver texto extraído (cópiamelo si me lo mandas)</button>`;
-          }
-          parsedItems = null; reviewItems = null;
-          render();
-          $("#p-showDebug")?.addEventListener("click", () => {
-            const ta = document.createElement("textarea");
-            ta.value = window.__lastPdfDebug || "";
-            ta.style.cssText = "width:100%;min-height:150px;margin-top:8px;";
-            $("#p-showDebug").replaceWith(ta);
-          });
-          return;
-        }
-        parsedItems = result.items;
-        status = `✅ Encontrados ${parsedItems.length} productos en la página ${result.page}. Revisa antes de confirmar.`;
-        rebuildReview();
-      } catch (e) {
-        status = "⚠️ Error leyendo el PDF: " + (e.message || e);
-        parsedItems = null; reviewItems = null;
-      }
-      render();
-    });
-
-    $("#p-ignored")?.addEventListener("input", e => {
-      ignoredText = e.target.value;
-      rebuildReview();
-      render();
-    });
-
-    $$('[data-ignore-idx]').forEach(box => {
-      box.addEventListener("click", () => {
-        const idx = Number(box.dataset.ignoreIdx);
-        reviewItems[idx].ignored = !reviewItems[idx].ignored;
-        render();
-      });
-    });
-
-    $("#p-confirm")?.addEventListener("click", () => {
-      const toAdd = reviewItems.filter(it => !it.matched && !it.ignored);
-      const ignoredList = ignoredText.split(",").map(s => s.trim()).filter(Boolean);
-      saveIgnoredIngredients(ignoredList);
-      openConfirm(
-        "Añadir al inventario",
-        `Se crearán ${toAdd.length} producto(s) nuevo(s), con stock 0 y marcados directamente como necesarios para la compra.`,
-        "Añadir",
-        () => {
-          toAdd.forEach(it => {
-            addProduct({
-              name: it.name.charAt(0).toUpperCase() + it.name.slice(1),
-              zone: guessZone(it.category),
-              location: "Despensa",
-              unit: it.unit,
-              stock: 0,
-              needsBuy: true,
-              note: "Importado del menú del nutricionista"
-            });
-          });
-          closeSheet();
-        }
-      );
-    });
-  };
-  render();
-}
-
-
-function openScanTicketSheet() {
-  let photoData = null;
-  let detected = [];
-
-  const render = () => {
-    const html = `
-      <div class="overlay" id="ovT">
-        <div class="sheet">
-          <h3>Escanear ticket</h3>
-          <div class="field">
-            <label>1. Foto del ticket (opcional, se guarda en el histórico)</label>
-            <input type="file" id="t-photo" accept="image/*" capture="environment">
-            ${photoData ? `<img src="${photoData}" style="width:100%;border-radius:10px;margin-top:8px;">` : ""}
-          </div>
-          <div class="field">
-            <label>2. Pega aquí el texto del ticket — ábrelo en Fotos, toca el icono Live Text (rayitas amarillas) → Seleccionar todo → Copiar</label>
-            <textarea id="t-text" placeholder="Pega el texto copiado del ticket…" style="min-height:100px;"></textarea>
-          </div>
-          <button class="btn btn-secondary btn-block" id="t-detect" style="margin-bottom:14px;">Detectar productos</button>
-          ${detected.length ? `
-            <div class="field"><label>3. Revisa antes de guardar (borra lo que no sea producto)</label></div>
-            <div id="t-items">
-              ${detected.map((it, i) => `
-                <div class="ing-row" data-i="${i}">
-                  <input type="text" data-f="name" value="${escapeHtml(it.name)}">
-                  <input type="text" data-f="price" value="${escapeHtml(it.price)}" style="flex:0 0 70px;">
-                  <button data-act="rm-t" data-i="${i}">×</button>
-                </div>`).join("")}
-            </div>
-          ` : ""}
-          <div class="sheet-actions">
-            <button class="btn btn-secondary" id="t-cancel">Cancelar</button>
-            <button class="btn btn-primary" id="t-save" ${detected.length === 0 && !photoData ? "disabled" : ""}>Guardar en historial</button>
-          </div>
-        </div>
-      </div>`;
-    $("#modalRoot").innerHTML = html;
-
-    $("#t-cancel").addEventListener("click", closeSheet);
-    $("#ovT").addEventListener("click", e => { if (e.target.id === "ovT") closeSheet(); });
-
-    $("#t-photo").addEventListener("change", async e => {
-      const file = e.target.files[0];
-      if (!file) return;
-      photoData = await compressImageFile(file);
-      render();
-    });
-
-    $("#t-detect").addEventListener("click", () => {
-      const text = $("#t-text").value;
-      detected = parseTicketText(text);
-      if (detected.length === 0) {
-        openConfirm("Sin resultados", "No he podido detectar líneas con precio en ese texto. Puedes añadir productos a mano tras guardar, o revisar que el texto pegado sea el correcto.", "Entendido", () => render());
-        return;
-      }
-      render();
-    });
-
-    $$('[data-act="rm-t"]').forEach(b => b.addEventListener("click", () => { detected.splice(Number(b.dataset.i), 1); render(); }));
-    $$("#t-items .ing-row").forEach(row => {
-      row.querySelectorAll("[data-f]").forEach(inp => {
-        inp.addEventListener("input", () => { detected[Number(row.dataset.i)][inp.dataset.f] = inp.value; });
-      });
-    });
-
-    $("#t-save").addEventListener("click", () => {
-      addHistoryEntry({
-        type: "ticket",
-        items: detected.map(d => ({ name: d.name, price: d.price })),
-        photo: photoData || null
-      });
-      closeSheet();
-    });
-  };
-  render();
-}
 
 // ==================================================================
 // EXPORTAR TICKET COMO ARCHIVO ÚNICO (imagen con fecha, foto y detalle)
