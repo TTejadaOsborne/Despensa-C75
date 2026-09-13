@@ -182,3 +182,82 @@ export function isIgnoredIngredient(name, ignoredList) {
     return t && (n === t || n.startsWith(t + " ") || n.includes(" " + t));
   });
 }
+
+// ---------- Importar el menú semanal (tabla "Día 1..7" x comidas) ----------
+const ROW_LABELS = [
+  { key: "desayuno", text: "Desayuno" },
+  { key: "media_manana", text: "Media Mañana" },
+  { key: "comida", text: "Comida" },
+  { key: "merienda", text: "Merienda 1" },
+  { key: "cena", text: "Cena" }
+];
+
+function assignNearest(val, anchors) {
+  let best = 0, bestDist = Infinity;
+  anchors.forEach((a, i) => { const d = Math.abs(a - val); if (d < bestDist) { bestDist = d; best = i; } });
+  return best;
+}
+
+export async function extractWeeklyMenuFromPdf(arrayBuffer) {
+  await ensurePdfJs();
+  const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+
+  for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+    const items = await getPageItems(pdf, pageNum);
+    const dayHeaders = items
+      .filter(it => /^Día\s*\d/i.test((it.str || "").trim()))
+      .sort((a, b) => a.x - b.x);
+    if (dayHeaders.length < 7) continue; // no es la página de la tabla semanal
+
+    const colStarts = dayHeaders.slice(0, 7).map(h => h.x);
+    const headerY = dayHeaders[0].y;
+
+    // Anclas de fila: buscamos el texto de cada etiqueta conocida en la columna izquierda
+    const leftItems = items.filter(it => it.x < 60 && it.y < headerY - 5);
+    const rowAnchors = ROW_LABELS.map(label => {
+      const lt = label.text.toLowerCase();
+      const match = leftItems.find(it => {
+        const s = (it.str || "").trim().toLowerCase();
+        return s && (lt.includes(s) || s.includes(lt));
+      });
+      return match ? match.y : null;
+    });
+    if (rowAnchors.some(y => y === null)) continue; // formato inesperado, no forzamos
+
+    // Solo texto de plato: por debajo de la cabecera de día, por encima del pie de página, y a la derecha del margen de las etiquetas de fila
+    const bottomCut = Math.min(...rowAnchors) - 120;
+    const dishItems = items.filter(it => it.x > 45 && it.y < headerY - 5 && it.y > bottomCut);
+
+    const cells = {};
+    dishItems.forEach(it => {
+      const col = assignNearest(it.x, colStarts);
+      const row = assignNearest(it.y, rowAnchors);
+      const key = `${row}-${col}`;
+      (cells[key] ||= []).push(it);
+    });
+
+    const days = [];
+    for (let col = 0; col < 7; col++) {
+      const day = { dayNum: col + 1 };
+      ROW_LABELS.forEach((label, row) => {
+        const its = cells[`${row}-${col}`] || [];
+        const lines = groupIntoLines(its);
+        lines.sort((a, b) => b.y - a.y);
+        const dishes = [];
+        lines.forEach(line => {
+          const txt = line.text.trim().replace(/\s+\d{1,2}$/, "");
+          if (!txt) return;
+          if (dishes.length && (dishes[dishes.length - 1].y - line.y) < 14) {
+            dishes[dishes.length - 1].text += " " + txt;
+          } else {
+            dishes.push({ y: line.y, text: txt });
+          }
+        });
+        day[label.key] = dishes.map(d => d.text.replace(/\s+/g, " ").trim()).join(" / ");
+      });
+      days.push(day);
+    }
+    return { ok: true, days, page: pageNum };
+  }
+  return { ok: false, reason: "no-table-page", days: [] };
+}

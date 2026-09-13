@@ -7,7 +7,7 @@ import {
   listenInspirations, addInspiration, deleteInspiration
 } from "./data.js";
 import {
-  extractShoppingListFromPdf, matchIngredientToProduct, guessZone,
+  extractShoppingListFromPdf, extractWeeklyMenuFromPdf, matchIngredientToProduct, guessZone,
   DEFAULT_IGNORED, isIgnoredIngredient
 } from "./pdf-import.js";
 import {
@@ -28,11 +28,10 @@ const $ = sel => document.querySelector(sel);
 const $$ = sel => Array.from(document.querySelectorAll(sel));
 const escapeHtml = s => (s || "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
 // Un producto entra en "por comprar" solo si está bajo mínimo Y tiene activo el seguimiento de compra.
-const needsRestock = p => p.stock <= p.min;
+const needsRestock = p => !!p.needsBuy;
 const unitOf = p => UNIT_MAP[p.unit] || UNIT_MAP.ud;
 const fmtNum = n => { const r = Math.round((n + Number.EPSILON) * 100) / 100; return Number.isInteger(r) ? String(r) : String(r); };
 const fmtQty = p => { const u = unitOf(p); return `${fmtNum(p.stock)} ${u.short}`; };
-const fmtMin = p => { const u = unitOf(p); return `mín. ${fmtNum(p.min)} ${u.short}`; };
 
 // ---------- Estado de compra compartido (doc único en Firestore) ----------
 const shoppingDocRef = doc(db, "state", "shopping");
@@ -108,15 +107,6 @@ function labelFor(offset) {
 let selectedLocation = "Todas";
 
 function renderInventario() {
-  const total = products.length;
-  const low = products.filter(needsRestock).length;
-  const frozen = products.filter(p => p.location === "Congelador").length;
-  $("#invMetrics").innerHTML = `
-    <div class="metric"><div class="num">${total}</div><div class="label">Productos</div></div>
-    <div class="metric ${low > 0 ? "warn" : ""}"><div class="num">${low}</div><div class="label">Por comprar</div></div>
-    <div class="metric"><div class="num">${frozen}</div><div class="label">En congelador</div></div>
-  `;
-
   if (products.length === 0) {
     $("#invLocTabs").innerHTML = "";
     $("#invList").innerHTML = emptyState("🧺", "Tu despensa está vacía", "Pulsa el botón + para añadir tu primer producto.");
@@ -144,15 +134,15 @@ function renderInventario() {
     if (selectedLocation === "Todas") html += `<div class="zone-group"><div class="zone-title">${escapeHtml(loc)}</div>`;
     else html += `<div class="zone-group">`;
     byLocation[loc].forEach(p => {
-      const low = needsRestock(p);
+      const marked = needsRestock(p);
       html += `
-        <div class="product-row compact ${low ? "low" : ""}" data-id="${p.id}">
+        <div class="product-row compact ${marked ? "low" : ""}" data-id="${p.id}">
+          <button class="cart-toggle ${marked ? "on" : ""}" data-cart="${p.id}" title="Marcar para comprar">🛒</button>
           <div class="product-info">
             <div class="product-name">${escapeHtml(p.name)}</div>
             <div class="product-meta">
               <span class="chip">${escapeHtml(p.zone)}</span>
               ${p.needsDefrost ? `<span class="chip frost">❄️ ${p.defrostHours}h antes</span>` : ""}
-              <span>${fmtMin(p)}</span>
             </div>
             ${p.note ? `<div style="font-size:10.5px;color:var(--text-soft);font-style:italic;margin-top:2px;">${escapeHtml(p.note)}</div>` : ""}
           </div>
@@ -169,6 +159,12 @@ function renderInventario() {
 }
 
 $("#invList").addEventListener("click", e => {
+  const cartBtn = e.target.closest("[data-cart]");
+  if (cartBtn) {
+    const p = products.find(x => x.id === cartBtn.dataset.cart);
+    if (p) updateProduct(p.id, { needsBuy: !p.needsBuy });
+    return;
+  }
   const btn = e.target.closest("button[data-act]");
   if (btn) {
     const p = products.find(x => x.id === btn.dataset.id);
@@ -195,7 +191,7 @@ $("#fabAdd").addEventListener("click", () => openProductSheet(null));
 
 function openProductSheet(product) {
   const editing = !!product;
-  const p = product || { name: "", zone: ZONES[0], location: "Despensa", stock: 1, min: 1, unit: "ud", note: "", needsDefrost: false, defrostHours: 24 };
+  const p = product || { name: "", zone: ZONES[0], location: "Despensa", stock: 1, unit: "ud", note: "", needsDefrost: false, defrostHours: 24, needsBuy: false };
   const html = `
     <div class="overlay" id="ov">
       <div class="sheet">
@@ -209,16 +205,16 @@ function openProductSheet(product) {
             <select id="f-zone">${ZONES.map(z => `<option ${z===p.zone?"selected":""}>${escapeHtml(z)}</option>`).join("")}</select>
           </div>
         </div>
-        <div class="field"><label>Unidad de medida</label>
-          <select id="f-unit">${UNITS.map(u => `<option value="${u.id}" ${(p.unit||"ud")===u.id?"selected":""}>${u.label}</option>`).join("")}</select>
-        </div>
         <div class="field-row">
+          <div class="field"><label>Unidad de medida</label>
+            <select id="f-unit">${UNITS.map(u => `<option value="${u.id}" ${(p.unit||"ud")===u.id?"selected":""}>${u.label}</option>`).join("")}</select>
+          </div>
           <div class="field"><label>Stock actual</label><input type="number" id="f-stock" value="${p.stock}" min="0" step="any"></div>
-          <div class="field"><label>Mínimo (avisa al llegar aquí)</label><input type="number" id="f-min" value="${p.min}" min="0" step="any"></div>
         </div>
         <div class="field"><label>Nota (opcional) — ej. "cada bolsa lleva 4 filetes"</label>
           <input type="text" id="f-note" value="${escapeHtml(p.note || "")}" placeholder="Contenido de cada unidad, si ayuda a recordarlo">
         </div>
+        <div class="check-field"><input type="checkbox" id="f-needbuy" ${p.needsBuy ? "checked" : ""}><label for="f-needbuy" style="margin:0;">Necesario para la compra</label></div>
         <div class="check-field"><input type="checkbox" id="f-frost" ${p.needsDefrost?"checked":""}><label for="f-frost" style="margin:0;">Hay que sacarlo del congelador con antelación</label></div>
         <div class="field" id="f-frost-hours-wrap" style="display:${p.needsDefrost?"block":"none"};">
           <label>Horas de antelación</label><input type="number" id="f-frost-hours" value="${p.defrostHours}" min="1">
@@ -253,8 +249,8 @@ function openProductSheet(product) {
       zone: $("#f-zone").value,
       unit: $("#f-unit").value,
       stock: Number($("#f-stock").value) || 0,
-      min: Number($("#f-min").value) || 0,
       note: $("#f-note").value.trim(),
+      needsBuy: $("#f-needbuy").checked,
       needsDefrost: $("#f-frost").checked,
       defrostHours: Number($("#f-frost-hours").value) || 24
     };
@@ -302,7 +298,7 @@ function renderMenu() {
 
   const dateStr = dateStrFor(selectedDayOffset);
   const dayData = menuByDate[dateStr] || {};
-  let html = `<div class="section-head" style="margin-top:2px;flex-wrap:wrap;gap:8px 14px;"><button class="mini-link" id="btnSuggest">💡 Qué puedo cocinar</button><button class="mini-link" id="btnInspiration">💭 Ideas guardadas</button><button class="mini-link" id="btnManageRecipes">Gestionar recetas</button></div>`;
+  let html = `<div class="section-head" style="margin-top:2px;flex-wrap:wrap;gap:8px 14px;"><button class="mini-link" id="btnSuggest">💡 Qué puedo cocinar</button><button class="mini-link" id="btnInspiration">💭 Ideas guardadas</button><button class="mini-link" id="btnImportWeek">📥 Importar semana (PDF)</button><button class="mini-link" id="btnManageRecipes">Gestionar recetas</button></div>`;
   MEAL_SLOTS.forEach(slot => {
     const meal = dayData[slot.id];
     const name = meal ? (meal.recipeName || meal.freeText) : null;
@@ -323,6 +319,7 @@ function renderMenu() {
   $("#btnManageRecipes")?.addEventListener("click", openRecipesSheet);
   $("#btnSuggest")?.addEventListener("click", openSuggestionsSheet);
   $("#btnInspiration")?.addEventListener("click", () => openInspirationSheet());
+  $("#btnImportWeek")?.addEventListener("click", () => openImportWeekSheet());
   $$('[data-act="edit-meal"]').forEach(b => b.addEventListener("click", () => openMealSheet(dateStr, b.dataset.slot)));
   $$('[data-act="clear-meal"]').forEach(b => b.addEventListener("click", () => clearMealSlot(dateStr, b.dataset.slot)));
 }
@@ -543,6 +540,98 @@ function computeRecipeMatches() {
   });
   scored.sort((a, b) => b.pct - a.pct || b.total - a.total);
   return { scored, withoutIngredients: recipes.length - withIng.length };
+}
+
+// ---------- Importar semana (Comida/Cena) desde el PDF de la dietista ----------
+function openImportWeekSheet() {
+  let parsedDays = null;
+  let status = "";
+  let startDate = dateStrFor(0); // por defecto, hoy = Día 1
+
+  const render = () => {
+    const html = `
+      <div class="overlay" id="ovW">
+        <div class="sheet">
+          <h3>Importar semana (PDF)</h3>
+          <div class="field"><label>PDF del plan (la tabla semanal, ej. página 2 de DietoPro)</label>
+            <input type="file" id="w-file" accept="application/pdf">
+          </div>
+          <div class="field"><label>¿Qué fecha es el "Día 1" del PDF?</label>
+            <input type="date" id="w-start" value="${startDate}">
+          </div>
+          ${status ? `<div class="tip">${status}</div>` : ""}
+          ${!parsedDays ? `
+            <button class="btn btn-primary btn-block" id="w-analyze" style="margin-top:6px;">Analizar PDF</button>
+          ` : `
+            <div style="font-size:12px;color:var(--text-soft);margin-bottom:10px;">Revisa y corrige antes de confirmar. Solo se importan Comida y Cena.</div>
+            <div id="w-list">
+              ${parsedDays.map((d, i) => {
+                const date = new Date(startDate + "T00:00:00");
+                date.setDate(date.getDate() + i);
+                const label = date.toLocaleDateString("es-ES", { weekday: "short", day: "numeric", month: "short" });
+                return `
+                <div class="meal-card">
+                  <div class="slot-label">Día ${d.dayNum} — ${label}</div>
+                  <div class="field" style="margin-bottom:8px;"><label>Comida</label><input type="text" data-day="${i}" data-slot="comida" value="${escapeHtml(d.comida)}"></div>
+                  <div class="field" style="margin-bottom:0;"><label>Cena</label><input type="text" data-day="${i}" data-slot="cena" value="${escapeHtml(d.cena)}"></div>
+                </div>`;
+              }).join("")}
+            </div>
+          `}
+          <div class="sheet-actions" style="margin-top:14px;">
+            <button class="btn btn-secondary" id="w-cancel">Cancelar</button>
+            ${parsedDays ? `<button class="btn btn-primary" id="w-confirm">Añadir al menú</button>` : ""}
+          </div>
+        </div>
+      </div>`;
+    $("#modalRoot").innerHTML = html;
+    $("#w-cancel").addEventListener("click", closeSheet);
+    $("#ovW").addEventListener("click", e => { if (e.target.id === "ovW") closeSheet(); });
+    $("#w-start")?.addEventListener("change", e => { startDate = e.target.value; render(); });
+
+    $("#w-analyze")?.addEventListener("click", async () => {
+      const file = $("#w-file").files[0];
+      if (!file) { status = "⚠️ Elige antes un fichero PDF."; render(); return; }
+      status = "Analizando PDF…";
+      render();
+      try {
+        const buf = await file.arrayBuffer();
+        const result = await extractWeeklyMenuFromPdf(buf);
+        if (!result.ok) {
+          status = "⚠️ No he encontrado la tabla semanal (Día 1...7) en este PDF. ¿Es la página correcta?";
+          parsedDays = null;
+          render();
+          return;
+        }
+        parsedDays = result.days;
+        status = `✅ Semana detectada en la página ${result.page}. Revisa cada día antes de confirmar.`;
+      } catch (e) {
+        status = "⚠️ Error leyendo el PDF: " + (e.message || e);
+        parsedDays = null;
+      }
+      render();
+    });
+
+    $$('#w-list input[data-day]').forEach(inp => {
+      inp.addEventListener("input", () => {
+        parsedDays[Number(inp.dataset.day)][inp.dataset.slot] = inp.value;
+      });
+    });
+
+    $("#w-confirm")?.addEventListener("click", () => {
+      openConfirm("Añadir al menú", "Se rellenarán Comida y Cena de estos 7 días. Si un día ya tenía algo planificado, se sobrescribirá.", "Confirmar", () => {
+        parsedDays.forEach((d, i) => {
+          const date = new Date(startDate + "T00:00:00");
+          date.setDate(date.getDate() + i);
+          const dateStr = date.toISOString().slice(0, 10);
+          if (d.comida) setMealSlot(dateStr, "comida", { recipeId: null, freeText: d.comida });
+          if (d.cena) setMealSlot(dateStr, "cena", { recipeId: null, freeText: d.cena });
+        });
+        closeSheet();
+      });
+    });
+  };
+  render();
 }
 
 function openSuggestionsSheet() {
@@ -807,7 +896,7 @@ function renderCompra() {
   $("#shopBadge").textContent = total;
 
   if (total === 0) {
-    $("#shopList").innerHTML = emptyState("✅", "Nada que comprar", "Cuando un producto baje de su mínimo, aparecerá aquí.");
+    $("#shopList").innerHTML = emptyState("✅", "Nada que comprar", "Marca productos como \"necesario para la compra\" desde el Inventario y aparecerán aquí.");
     $("#btnConfirmPurchase").style.display = "none";
     return;
   }
@@ -827,7 +916,7 @@ function renderCompra() {
           <div class="checkbox ${on?"on":""}" data-id="${p.id}">${on ? "✓" : ""}</div>
           <div class="product-info">
             <div class="product-name">${escapeHtml(p.name)}</div>
-            <div class="product-meta">tienes ${fmtQty(p)} · repón a ${fmtNum(p.min)} ${unitOf(p).short}</div>
+            <div class="product-meta">tienes ${fmtQty(p)}</div>
           </div>
           <div class="shop-needed">${stockLabel}</div>
         </div>`;
@@ -849,9 +938,9 @@ $("#btnConfirmPurchase").addEventListener("click", () => {
     openConfirm("Nada marcado", "Marca los productos que has comprado antes de confirmar.", "Entendido", closeSheet);
     return;
   }
-  openConfirm("Confirmar compra", `Se repondrán ${needed.length} producto(s) a su cantidad mínima y se guardará en el historial.`, "Confirmar", () => {
-    const items = needed.map(p => ({ name: p.name, from: p.stock, to: p.min, unit: unitOf(p).short }));
-    needed.forEach(p => updateProduct(p.id, { stock: p.min }));
+  openConfirm("Confirmar compra", `Se quitarán ${needed.length} producto(s) de la lista y quedará registrado en el historial. Recuerda actualizar el stock con +/− en el Inventario cuando los guardes.`, "Confirmar", () => {
+    const items = needed.map(p => ({ name: p.name }));
+    needed.forEach(p => updateProduct(p.id, { needsBuy: false }));
     addHistoryEntry({ items, type: "purchase" });
     clearShoppingCheckedFor(needed.map(p => p.id));
     closeSheet();
@@ -1049,7 +1138,7 @@ function openImportMenuPdfSheet() {
       saveIgnoredIngredients(ignoredList);
       openConfirm(
         "Añadir al inventario",
-        `Se crearán ${toAdd.length} producto(s) nuevo(s), con stock 0 y el mínimo puesto a lo que indica el menú — así entran directos en tu lista de la compra.`,
+        `Se crearán ${toAdd.length} producto(s) nuevo(s), con stock 0 y marcados directamente como necesarios para la compra.`,
         "Añadir",
         () => {
           toAdd.forEach(it => {
@@ -1059,7 +1148,7 @@ function openImportMenuPdfSheet() {
               location: "Despensa",
               unit: it.unit,
               stock: 0,
-              min: it.qty || 1,
+              needsBuy: true,
               note: "Importado del menú del nutricionista"
             });
           });
@@ -1280,7 +1369,7 @@ function renderHistorial() {
     const rows = (h.items || []).map(it =>
       isTicket
         ? `<div>${escapeHtml(it.name)}${it.price ? " — " + escapeHtml(it.price) + " €" : ""}</div>`
-        : `<div>${escapeHtml(it.name)} — ${it.from} → ${it.to}${it.unit ? " " + escapeHtml(it.unit) : ""}</div>`
+        : `<div>✓ ${escapeHtml(it.name)}</div>`
     ).join("");
     return `
       <div class="hist-entry" data-id="${h.id}">

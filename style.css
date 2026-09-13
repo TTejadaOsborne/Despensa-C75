@@ -144,6 +144,23 @@ main {
 .product-row.compact .chip { font-size: 9px; padding: 1px 5px; }
 .stepper.compact button { width: 26px; height: 26px; font-size: 15px; }
 .stepper.compact .val { font-size: 12.5px; min-width: 34px; }
+.cart-toggle {
+  flex-shrink: 0;
+  width: 30px; height: 30px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border);
+  background: var(--surface);
+  font-size: 14px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  opacity: 0.45;
+}
+.cart-toggle.on {
+  opacity: 1;
+  background: var(--primary);
+  border-color: var(--primary);
+  filter: none;
+}
 .product-info { flex: 1; min-width: 0; }
 .product-name { font-size: 15px; font-weight: 500; }
 .product-meta { font-size: 12px; color: var(--text-soft); margin-top: 2px; display: flex; gap: 6px; align-items: center; }

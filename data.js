@@ -64,7 +64,7 @@ export async function addProduct(p) {
     zone: p.zone || "Otros",
     location: p.location || "Despensa",
     stock: Number(p.stock) || 0,
-    min: Number(p.min) || 1,
+    needsBuy: !!p.needsBuy,
     unit: p.unit || "ud",
     note: p.note || "",
     needsDefrost: !!p.needsDefrost,
