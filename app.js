@@ -22,16 +22,17 @@ let history = [];
 let inspirations = [];
 let shoppingChecked = {}; // { productId: true }
 let selectedDayOffset = 0;
+let selectedLocation = "Todas";
 let syncFlags = { products: false, recipes: false, menu: false, history: false, shopping: false, inspirations: false, settings: false };
 
 const $ = sel => document.querySelector(sel);
 const $$ = sel => Array.from(document.querySelectorAll(sel));
 const escapeHtml = s => (s || "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
-// Un producto entra en "por comprar" solo si está bajo mínimo Y tiene activo el seguimiento de compra.
 const needsRestock = p => !!p.needsBuy;
 const unitOf = p => UNIT_MAP[p.unit] || UNIT_MAP.ud;
 const fmtNum = n => { const r = Math.round((n + Number.EPSILON) * 100) / 100; return Number.isInteger(r) ? String(r) : String(r); };
 const fmtQty = p => { const u = unitOf(p); return `${fmtNum(p.stock)} ${u.short}`; };
+const DOW = ["Dom","Lun","Mar","Mié","Jue","Vie","Sáb"];
 
 // ---------- Estado de compra compartido (doc único en Firestore) ----------
 const shoppingDocRef = doc(db, "state", "shopping");
@@ -87,7 +88,6 @@ function switchView(name) {
 }
 
 // ---------- Fechas ----------
-const DOW = ["Dom","Lun","Mar","Mié","Jue","Vie","Sáb"];
 function dateStrFor(offset) {
   const d = new Date();
   d.setDate(d.getDate() + offset);
@@ -104,7 +104,6 @@ function labelFor(offset) {
 // ==================================================================
 // RENDER: INVENTARIO
 // ==================================================================
-let selectedLocation = "Todas";
 
 function renderInventario() {
   if (products.length === 0) {
