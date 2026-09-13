@@ -305,7 +305,7 @@ function renderMenu() {
   $$(".day-tab").forEach(b => b.addEventListener("click", () => { selectedDayOffset = Number(b.dataset.offset); renderMenu(); }));
 
   const dateStr = dateStrFor(selectedDayOffset);
-  let html = `<div class="section-head" style="margin-top:2px;flex-wrap:wrap;gap:8px 14px;"><button class="mini-link" id="btnImportWeek">📥 Importar semana (PDF)</button><button class="mini-link" id="btnManageRecipes">Gestionar recetas</button></div>`;
+  let html = "";
   MEAL_SLOTS.forEach(slot => {
     const dishes = getDishes(dateStr, slot.id);
 
@@ -367,8 +367,6 @@ function renderMenu() {
   });
   $("#menuBody").innerHTML = html;
 
-  $("#btnManageRecipes")?.addEventListener("click", openRecipesSheet);
-  $("#btnImportWeek")?.addEventListener("click", () => openImportWeekSheet());
   $$('[data-act="edit-meal"]').forEach(b => b.addEventListener("click", () => {
     const idx = b.dataset.idx !== undefined ? Number(b.dataset.idx) : null;
     openMealSheet(dateStr, b.dataset.slot, idx);
@@ -382,37 +380,139 @@ function renderMenu() {
 
 function cookMeal(dateStr, slotId) {
   const dishes = getDishes(dateStr, slotId);
-  const aggByProduct = {};
+  const pool = {}; // productId -> cantidad habitual (el conjunto de ingredientes que suele usar esta franja)
   dishes.forEach(d => {
     if (!d.recipeId) return;
     const r = recipes.find(x => x.id === d.recipeId);
     if (!r) return;
     (r.ingredients || []).forEach(ing => {
       if (!ing.productId || ing.amount == null) return;
-      aggByProduct[ing.productId] = (aggByProduct[ing.productId] || 0) + ing.amount;
+      pool[ing.productId] = (pool[ing.productId] || 0) + ing.amount;
     });
   });
-  const entries = Object.entries(aggByProduct);
-  if (entries.length === 0) return;
-  const willGoNegative = entries.some(([pid, amount]) => {
-    const p = products.find(x => x.id === pid);
-    return p && (p.stock - amount) < 0;
-  });
+  if (Object.keys(pool).length === 0) return;
+
+  const selected = {}; // productId -> cantidad, SOLO los que se marquen como usados esta vez (empieza vacío)
   const slotLabel = MEAL_SLOTS.find(s => s.id === slotId)?.label || "";
-  openConfirm(
-    "Cocinar " + slotLabel.toLowerCase(),
-    `Se restará de tu inventario lo que usan los platos de esta franja.${willGoNegative ? " Ojo: algún ingrediente se quedará por debajo de 0 — parece que no tenías suficiente." : ""}`,
-    "Cocinar",
-    () => {
-      entries.forEach(([pid, amount]) => {
-        const p = products.find(x => x.id === pid);
-        if (!p) return;
-        const next = Math.round((p.stock - amount + Number.EPSILON) * 100) / 100;
-        updateProduct(p.id, { stock: next });
+  let filterText = "";
+
+  const render = () => {
+    const poolIds = Object.keys(pool);
+    const extraIds = Object.keys(selected).filter(id => !pool[id] && selected[id] != null); // añadidos sueltos, no del pool
+    const filtered = products
+      .filter(p => !(p.id in pool) && !(p.id in selected) && p.name.toLowerCase().includes(filterText.toLowerCase()))
+      .sort((a, b) => a.name.localeCompare(b.name, "es"))
+      .slice(0, 6);
+
+    const rowHtml = (pid, isPoolItem) => {
+      const p = products.find(x => x.id === pid);
+      if (!p) return "";
+      const checked = pid in selected;
+      const amt = checked ? selected[pid] : pool[pid];
+      const u = unitOf(p).short;
+      const after = checked ? Math.round((p.stock - (Number(amt) || 0) + Number.EPSILON) * 100) / 100 : null;
+      return `
+        <div class="pick-row">
+          <div class="checkbox ${checked ? "on" : ""}" data-toggle-pid="${pid}" data-default-amt="${pool[pid] ?? 1}">${checked ? "✓" : ""}</div>
+          <div class="pick-name">${escapeHtml(p.name)}<span class="ing-unit" style="flex:0;white-space:nowrap;">tienes ${fmtNum(p.stock)} ${u}</span></div>
+          ${checked ? `<input type="number" step="any" min="0" data-cook-amount="${pid}" value="${amt}">` : ""}
+          ${checked ? `<span class="ing-unit">${u}</span>` : ""}
+          ${!isPoolItem && checked ? `<button class="dish-remove" data-remove-extra="${pid}" title="Quitar">×</button>` : ""}
+        </div>
+        ${checked ? `<div style="font-size:11px;color:${after<0?"var(--danger)":"var(--text-soft)"};margin:-4px 0 8px 0;padding-left:2px;">quedaría ${fmtNum(after)} ${u}</div>` : ""}`;
+    };
+
+    const html = `
+      <div class="overlay" id="ovC">
+        <div class="sheet">
+          <h3>Cocinar ${slotLabel.toLowerCase()}</h3>
+          <div style="font-size:12.5px;color:var(--text-soft);margin-bottom:10px;">Marca lo que habéis usado esta vez — nada se resta hasta que lo selecciones.</div>
+          <div id="cookRows">
+            ${poolIds.map(pid => rowHtml(pid, true)).join("")}
+            ${extraIds.map(pid => rowHtml(pid, false)).join("")}
+          </div>
+          <div class="field"><label>Añadir algo que no suele llevar</label>
+            <input type="text" id="cook-filter" placeholder="Buscar producto…" value="${escapeHtml(filterText)}">
+          </div>
+          ${filterText ? `
+            <div style="border:1px solid var(--border);border-radius:var(--radius-s);margin-bottom:14px;max-height:180px;overflow-y:auto;">
+              ${filtered.length === 0 ? `<div style="padding:10px;font-size:12.5px;color:var(--text-soft);">Sin coincidencias.</div>` : filtered.map(p => `
+                <div class="pick-row" data-add-pid="${p.id}" style="cursor:pointer;">
+                  <div class="pick-name">${escapeHtml(p.name)}</div>
+                  <span class="ing-unit">${unitOf(p).short}</span>
+                </div>`).join("")}
+            </div>
+          ` : ""}
+          <div class="sheet-actions">
+            <button class="btn btn-secondary" id="cook-cancel">Cancelar</button>
+            <button class="btn btn-primary" id="cook-confirm">Cocinar</button>
+          </div>
+        </div>
+      </div>`;
+    $("#modalRoot").innerHTML = html;
+    $("#cook-cancel").addEventListener("click", closeSheet);
+    $("#ovC").addEventListener("click", e => { if (e.target.id === "ovC") closeSheet(); });
+
+    $$('[data-toggle-pid]').forEach(box => {
+      box.addEventListener("click", () => {
+        const pid = box.dataset.togglePid;
+        if (pid in selected) delete selected[pid];
+        else selected[pid] = Number(box.dataset.defaultAmt) || 1;
+        render();
       });
-      closeSheet();
-    }
-  );
+    });
+    $$('[data-cook-amount]').forEach(inp => {
+      inp.addEventListener("click", e => e.stopPropagation());
+      inp.addEventListener("input", () => { selected[inp.dataset.cookAmount] = inp.value === "" ? 0 : Number(inp.value); });
+      inp.addEventListener("change", () => render());
+      inp.addEventListener("focus", () => inp.select());
+    });
+    $$('[data-remove-extra]').forEach(btn => btn.addEventListener("click", e => {
+      e.stopPropagation();
+      delete selected[btn.dataset.removeExtra];
+      render();
+    }));
+
+    const fInput = $("#cook-filter");
+    fInput.addEventListener("input", e => { filterText = e.target.value; render(); });
+    if (filterText) { fInput.focus(); fInput.selectionStart = fInput.selectionEnd = fInput.value.length; }
+    $$('[data-add-pid]').forEach(row => row.addEventListener("click", () => {
+      selected[row.dataset.addPid] = 1;
+      filterText = "";
+      render();
+    }));
+
+    $("#cook-confirm").addEventListener("click", () => {
+      const entries = Object.entries(selected).filter(([, amt]) => amt > 0);
+      if (entries.length === 0) { closeSheet(); return; }
+      openConfirm(
+        "Confirmar",
+        "Se restará esto de tu inventario y quedará guardado en el Historial. Los ingredientes habituales de la receta no cambian, solo lo que va a pasar ahora.",
+        "Cocinar",
+        () => {
+          entries.forEach(([pid, amt]) => {
+            const p = products.find(x => x.id === pid);
+            if (!p) return;
+            const next = Math.round((p.stock - amt + Number.EPSILON) * 100) / 100;
+            updateProduct(p.id, { stock: next });
+          });
+          const items = entries.map(([pid, amt]) => {
+            const p = products.find(x => x.id === pid);
+            return { productId: pid, name: p ? p.name : "", amount: amt, unit: p ? unitOf(p).short : "" };
+          });
+          addHistoryEntry({
+            type: "cooked",
+            slot: slotId,
+            slotLabel,
+            dishNames: dishes.map(d => d.recipeName || d.freeText || "").filter(Boolean),
+            items
+          });
+          closeSheet();
+        }
+      );
+    });
+  };
+  render();
 }
 
 function frostWarningsFor(recipeId) {
@@ -517,7 +617,7 @@ function openMealSheet(dateStr, slotId, dishIndex) {
                   <div class="oc-title">${escapeHtml(r.name)}</div>
                   <div class="oc-sub">${(r.ingredients||[]).length} ingrediente(s)${r.url ? " · con enlace" : ""}</div>
                 </div>
-                <div class="oc-chevron">›</div>
+                <button class="oc-edit" data-edit-rid="${r.id}" title="Editar receta">✏️</button>
               </div>`).join("")}
           <div class="sheet-actions" style="margin-top:4px;">
             <button class="btn btn-secondary btn-block" id="m-back">‹ Volver</button>
@@ -527,6 +627,10 @@ function openMealSheet(dateStr, slotId, dishIndex) {
     $("#modalRoot").innerHTML = html;
     $("#m-back").addEventListener("click", renderHome);
     $("#ovR").addEventListener("click", e => { if (e.target.id === "ovR") closeSheet(); });
+    $$('[data-edit-rid]').forEach(btn => btn.addEventListener("click", e => {
+      e.stopPropagation();
+      openRecipeEditor(recipes.find(x => x.id === btn.dataset.editRid), () => renderPickExisting());
+    }));
     $$('[data-rid]').forEach(card => card.addEventListener("click", () => {
       const r = recipes.find(x => x.id === card.dataset.rid);
       applyDish({ recipeId: r.id, recipeName: r.name });
@@ -1270,18 +1374,29 @@ function renderHistorial() {
     const d = h.createdAt?.toDate ? h.createdAt.toDate() : new Date();
     const dateLabel = d.toLocaleDateString("es-ES", { day: "numeric", month: "long", year: "numeric" });
     const isTicket = h.type === "ticket";
-    const rows = (h.items || []).map(it =>
-      isTicket
-        ? `<div>${escapeHtml(it.name)}${it.price ? " — " + escapeHtml(it.price) + " €" : ""}</div>`
-        : `<div>✓ ${escapeHtml(it.name)}</div>`
-    ).join("");
+    const isCooked = h.type === "cooked";
+    let headLabel, countLabel, rows;
+    if (isCooked) {
+      headLabel = `🍳 ${dateLabel} — ${escapeHtml(h.slotLabel || "")}`;
+      countLabel = "";
+      rows = `${(h.dishNames||[]).length ? `<div style="font-weight:600;margin-bottom:6px;">${escapeHtml((h.dishNames||[]).join(", "))}</div>` : ""}${(h.items || []).map(it => `<div>${escapeHtml(it.name)} — ${fmtNum(it.amount)} ${escapeHtml(it.unit||"")}</div>`).join("")}`;
+    } else if (isTicket) {
+      headLabel = `🧾 ${dateLabel}`;
+      countLabel = `${(h.items||[]).length} producto(s)`;
+      rows = (h.items || []).map(it => `<div>${escapeHtml(it.name)}${it.price ? " — " + escapeHtml(it.price) + " €" : ""}</div>`).join("");
+    } else {
+      headLabel = dateLabel;
+      countLabel = `${(h.items||[]).length} producto(s)`;
+      rows = (h.items || []).map(it => `<div>✓ ${escapeHtml(it.name)}</div>`).join("");
+    }
     return `
       <div class="hist-entry" data-id="${h.id}">
         <div class="hist-head">
-          <span class="hist-date">${isTicket ? "🧾 " : ""}${dateLabel}</span>
+          <span class="hist-date">${headLabel}</span>
           <span style="display:flex;align-items:center;gap:8px;">
-            <span class="hist-count">${(h.items||[]).length} producto(s)</span>
+            <span class="hist-count">${countLabel}</span>
             ${isTicket ? `<button class="mini-link" data-act="export-ticket" data-id="${h.id}">Guardar</button>` : ""}
+            ${isCooked ? `<button class="mini-link" data-act="repeat-cooked" data-id="${h.id}">🔁 Repetir hoy</button>` : ""}
           </span>
         </div>
         <div class="hist-body">
@@ -1292,6 +1407,25 @@ function renderHistorial() {
   }).join("");
 }
 $("#histList").addEventListener("click", e => {
+  const repeatBtn = e.target.closest('[data-act="repeat-cooked"]');
+  if (repeatBtn) {
+    e.stopPropagation();
+    const entry = history.find(h => h.id === repeatBtn.dataset.id);
+    if (!entry) return;
+    openConfirm(
+      "Repetir hoy",
+      `Se añadirá "${(entry.dishNames||[]).join(", ") || "este plato"}" a ${MEAL_SLOTS.find(s=>s.id===entry.slot)?.label || entry.slot} de hoy.`,
+      "Añadir",
+      () => {
+        const todayStr = dateStrFor(0);
+        const dishes = getDishes(todayStr, entry.slot);
+        (entry.dishNames || []).forEach(name => dishes.push({ recipeId: null, freeText: name }));
+        saveDishes(todayStr, entry.slot, dishes);
+        closeSheet();
+      }
+    );
+    return;
+  }
   const exportBtn = e.target.closest('[data-act="export-ticket"]');
   if (exportBtn) {
     e.stopPropagation();
