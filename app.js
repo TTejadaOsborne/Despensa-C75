@@ -108,6 +108,7 @@ function labelFor(offset) {
 // ==================================================================
 let selectMode = false;
 let selectedIds = new Set();
+let selectedLocation = "Todas";
 
 function renderInventario() {
   const total = products.length;
@@ -120,10 +121,21 @@ function renderInventario() {
   `;
 
   if (products.length === 0) {
+    $("#invLocTabs").innerHTML = "";
     $("#invList").innerHTML = emptyState("🧺", "Tu despensa está vacía", "Pulsa el botón + para añadir tu primer producto.");
     $("#invSelectBar").innerHTML = "";
     return;
   }
+
+  // Selector de ubicación (para no tener que hacer scroll por todas)
+  const locTabs = ["Todas", ...LOCATIONS];
+  $("#invLocTabs").innerHTML = locTabs.map(loc => {
+    const count = loc === "Todas" ? products.length : products.filter(p => p.location === loc).length;
+    return `<button class="day-tab loc-tab ${selectedLocation === loc ? "active" : ""}" data-loc="${escapeHtml(loc)}">
+      <span class="dname">${escapeHtml(loc)}</span><span class="dnum">${count}</span>
+    </button>`;
+  }).join("");
+  $$(".loc-tab").forEach(b => b.addEventListener("click", () => { selectedLocation = b.dataset.loc; renderInventario(); }));
 
   // Barra de selección múltiple
   if (selectMode) {
@@ -148,18 +160,21 @@ function renderInventario() {
     $("#selStart").addEventListener("click", () => { selectMode = true; renderInventario(); });
   }
 
+  const visible = selectedLocation === "Todas" ? products : products.filter(p => p.location === selectedLocation);
   const byLocation = {};
-  products.forEach(p => { (byLocation[p.location] ||= []).push(p); });
+  visible.forEach(p => { (byLocation[p.location] ||= []).push(p); });
+  Object.values(byLocation).forEach(list => list.sort((a, b) => a.name.localeCompare(b.name, "es")));
 
   let html = "";
   LOCATIONS.forEach(loc => {
     if (!byLocation[loc]) return;
-    html += `<div class="zone-group"><div class="zone-title">${escapeHtml(loc)}</div>`;
+    if (selectedLocation === "Todas") html += `<div class="zone-group"><div class="zone-title">${escapeHtml(loc)}</div>`;
+    else html += `<div class="zone-group">`;
     byLocation[loc].forEach(p => {
       const low = needsRestock(p);
       const checked = selectedIds.has(p.id);
       html += `
-        <div class="product-row ${low ? "low" : ""}" data-id="${p.id}">
+        <div class="product-row compact ${low ? "low" : ""}" data-id="${p.id}">
           ${selectMode ? `<div class="checkbox ${checked ? "on" : ""}" data-select="${p.id}">${checked ? "✓" : ""}</div>` : ""}
           <div class="product-info">
             <div class="product-name">${escapeHtml(p.name)}</div>
@@ -168,10 +183,10 @@ function renderInventario() {
               ${p.needsDefrost ? `<span class="chip frost">❄️ ${p.defrostHours}h antes</span>` : ""}
               ${p.trackShopping === false ? `<span class="chip" style="background:#EDEAE0;color:var(--text-soft);">sin seguimiento</span>` : `<span>${fmtMin(p)}</span>`}
             </div>
-            ${p.note ? `<div style="font-size:11.5px;color:var(--text-soft);font-style:italic;margin-top:2px;">${escapeHtml(p.note)}</div>` : ""}
+            ${p.note ? `<div style="font-size:10.5px;color:var(--text-soft);font-style:italic;margin-top:2px;">${escapeHtml(p.note)}</div>` : ""}
           </div>
           ${selectMode ? "" : `
-          <div class="stepper">
+          <div class="stepper compact">
             <button data-act="dec" data-id="${p.id}">−</button>
             <span class="val">${fmtQty(p)}</span>
             <button data-act="inc" data-id="${p.id}">+</button>
@@ -864,6 +879,7 @@ function renderCompra() {
     html += `<div class="zone-group"><div class="zone-title">${escapeHtml(zone)}</div>`;
     byZone[zone].forEach(p => {
       const on = !!shoppingChecked[p.id];
+      const stockLabel = fmtQty(p);
       html += `
         <div class="shop-row ${on?"checked":""}" data-id="${p.id}">
           <div class="checkbox ${on?"on":""}" data-id="${p.id}">${on ? "✓" : ""}</div>
@@ -871,6 +887,7 @@ function renderCompra() {
             <div class="product-name">${escapeHtml(p.name)}</div>
             <div class="product-meta">tienes ${fmtQty(p)} · repón a ${fmtNum(p.min)} ${unitOf(p).short}</div>
           </div>
+          <div class="shop-needed">${stockLabel}</div>
         </div>`;
     });
     html += `</div>`;
@@ -1043,11 +1060,21 @@ function openImportMenuPdfSheet() {
         if (!result.ok || result.items.length === 0) {
           const msgs = {
             "no-list-page": "No encuentro una página \"LISTA DE LA COMPRA\" en este PDF. ¿Es un export de DietoPro? Con otro formato puede no funcionar.",
-            "parse-empty": "Encontré la página pero no pude leer los productos — el diseño puede haber cambiado. Dímelo y lo reviso."
+            "parse-empty": "Encontré la página pero no pude leer los productos — el diseño puede haber cambiado."
           };
           status = "⚠️ " + (msgs[result.reason] || "No he podido leer el PDF.");
+          if (result.debugLines) {
+            window.__lastPdfDebug = result.debugLines.join("\n");
+            status += ` <button class="mini-link" id="p-showDebug" style="display:block;margin-top:6px;">Ver texto extraído (cópiamelo si me lo mandas)</button>`;
+          }
           parsedItems = null; reviewItems = null;
           render();
+          $("#p-showDebug")?.addEventListener("click", () => {
+            const ta = document.createElement("textarea");
+            ta.value = window.__lastPdfDebug || "";
+            ta.style.cssText = "width:100%;min-height:150px;margin-top:8px;";
+            $("#p-showDebug").replaceWith(ta);
+          });
           return;
         }
         parsedItems = result.items;

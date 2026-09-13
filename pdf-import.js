@@ -18,7 +18,7 @@ async function ensurePdfJs() {
   pdfjsLoaded = true;
 }
 
-const QTY_TOKEN_RE = /^([\d]+(?:[.,]\d+)?)(g|kg|ml|l)$/i;
+const QTY_START_RE = /^([\d]+(?:[.,]\d+)?)\s*(g|kg|ml|l)\b/i;
 const QTY_RE = /^([\d]+(?:[.,]\d+)?)\s*(g|kg|ml|l)\s+(.+)$/i;
 const SHOPPING_LIST_TITLE = "LISTA DE LA COMPRA";
 
@@ -67,7 +67,7 @@ async function getPageItems(pdf, pageNum) {
 
 function parseShoppingListPage(items) {
   const fontCounts = {};
-  items.forEach(it => { if (QTY_TOKEN_RE.test((it.str || "").trim())) fontCounts[it.fontName] = (fontCounts[it.fontName] || 0) + 1; });
+  items.forEach(it => { if (QTY_START_RE.test((it.str || "").trim())) fontCounts[it.fontName] = (fontCounts[it.fontName] || 0) + 1; });
   const itemFont = Object.entries(fontCounts).sort((a, b) => b[1] - a[1])[0]?.[0];
   if (!itemFont) return { items: [], itemFont: null };
 
@@ -125,7 +125,7 @@ export async function extractShoppingListFromPdf(arrayBuffer) {
     if (!lines.some(l => l.text.toUpperCase().includes(SHOPPING_LIST_TITLE))) continue;
     const { items: parsed } = parseShoppingListPage(items);
     if (parsed.length > 0) return { ok: true, items: parsed, page: i };
-    return { ok: false, reason: "parse-empty", items: [] };
+    return { ok: false, reason: "parse-empty", items: [], debugLines: lines.map(l => l.text) };
   }
   return { ok: false, reason: "no-list-page", items: [] };
 }
