@@ -2,7 +2,7 @@ import {
   ZONES, LOCATIONS, MEAL_SLOTS, UNITS, UNIT_MAP,
   listenProducts, addProduct, updateProduct, deleteProduct,
   listenRecipes, addRecipe, updateRecipe, deleteRecipe,
-  listenMenu, setMealSlot, clearMealSlot,
+  listenMenu, setMealSlot,
   listenHistory, addHistoryEntry,
   listenInspirations, addInspiration, deleteInspiration
 } from "./data.js";
@@ -277,6 +277,22 @@ function emptyState(glyph, title, text) {
 // ==================================================================
 // RENDER: MENÚ SEMANAL
 // ==================================================================
+function getDishes(dateStr, slotId) {
+  const raw = (menuByDate[dateStr] || {})[slotId];
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw;
+  return [raw]; // formato antiguo (un solo plato) — se sigue mostrando igual
+}
+
+function saveDishes(dateStr, slotId, dishes) {
+  return setMealSlot(dateStr, slotId, dishes);
+}
+
+function removeDish(dateStr, slotId, idx) {
+  const dishes = getDishes(dateStr, slotId).filter((_, i) => i !== idx);
+  saveDishes(dateStr, slotId, dishes);
+}
+
 function renderMenu() {
   let tabs = "";
   for (let i = 0; i < 7; i++) {
@@ -289,23 +305,41 @@ function renderMenu() {
   $$(".day-tab").forEach(b => b.addEventListener("click", () => { selectedDayOffset = Number(b.dataset.offset); renderMenu(); }));
 
   const dateStr = dateStrFor(selectedDayOffset);
-  const dayData = menuByDate[dateStr] || {};
-  let html = `<div class="section-head" style="margin-top:2px;flex-wrap:wrap;gap:8px 14px;"><button class="mini-link" id="btnSuggest">💡 Qué puedo cocinar</button><button class="mini-link" id="btnInspiration">💭 Ideas guardadas</button><button class="mini-link" id="btnImportWeek">📥 Importar semana (PDF)</button><button class="mini-link" id="btnManageRecipes">Gestionar recetas</button></div>`;
+  let html = `<div class="section-head" style="margin-top:2px;flex-wrap:wrap;gap:8px 14px;"><button class="mini-link" id="btnImportWeek">📥 Importar semana (PDF)</button><button class="mini-link" id="btnManageRecipes">Gestionar recetas</button></div>`;
   MEAL_SLOTS.forEach(slot => {
-    const meal = dayData[slot.id];
-    const name = meal ? (meal.recipeName || meal.freeText) : null;
-    const recipe = meal && meal.recipeId ? recipes.find(r => r.id === meal.recipeId) : null;
-    const linkedIng = recipe ? (recipe.ingredients || []).filter(i => i.productId && i.amount != null) : [];
-    const frostItems = recipe ? frostWarningsFor(recipe.id) : [];
+    const dishes = getDishes(dateStr, slot.id);
+
+    // Ingredientes agregados de todos los platos de esta franja (sumando si se repite el mismo producto)
+    const aggByProduct = {};
+    const frostNames = new Set();
+    dishes.forEach(d => {
+      if (!d.recipeId) return;
+      const r = recipes.find(x => x.id === d.recipeId);
+      if (!r) return;
+      (r.ingredients || []).forEach(ing => {
+        if (!ing.productId || ing.amount == null) return;
+        aggByProduct[ing.productId] = (aggByProduct[ing.productId] || 0) + ing.amount;
+      });
+      frostWarningsFor(r.id).forEach(n => frostNames.add(n));
+    });
+    const aggIng = Object.entries(aggByProduct).map(([pid, amount]) => ({ productId: pid, amount }));
+
     html += `
       <div class="meal-card" data-slot="${slot.id}">
         <div class="slot-band" style="background:${slot.color};">${slot.label}</div>
         <div class="meal-card-body">
-          <div class="meal-name">${name ? escapeHtml(name) : `<span class="meal-empty">Sin planificar</span>`}</div>
-          ${frostItems.length ? `<div class="frost-note">❄️ Sacar del congelador: ${frostItems.map(escapeHtml).join(", ")}</div>` : ""}
-          ${linkedIng.length ? `
+          ${dishes.map((d, idx) => {
+            const name = d.recipeName || d.freeText || "";
+            return `
+            <div class="dish-row" data-act="edit-meal" data-slot="${slot.id}" data-idx="${idx}">
+              <span class="dish-name">${escapeHtml(name)}</span>
+              <button class="dish-remove" data-act="remove-dish" data-slot="${slot.id}" data-idx="${idx}" title="Quitar este plato">×</button>
+            </div>`;
+          }).join("")}
+          ${frostNames.size ? `<div class="frost-note">❄️ Sacar del congelador: ${[...frostNames].map(escapeHtml).join(", ")}</div>` : ""}
+          ${aggIng.length ? `
             <table class="ing-table">
-              ${linkedIng.map(ing => {
+              ${aggIng.map(ing => {
                 const p = products.find(x => x.id === ing.productId);
                 if (!p) return "";
                 const after = Math.round((p.stock - ing.amount + Number.EPSILON) * 100) / 100;
@@ -319,44 +353,61 @@ function renderMenu() {
               }).join("")}
             </table>
           ` : ""}
-          <div class="meal-actions">
-            <button class="btn btn-secondary" data-act="edit-meal" data-slot="${slot.id}">${name ? "Cambiar" : "Planificar"}</button>
-            ${name ? `<button class="btn btn-secondary" data-act="clear-meal" data-slot="${slot.id}">Quitar</button>` : ""}
-            ${linkedIng.length ? `<button class="btn btn-primary" data-act="cook-meal" data-slot="${slot.id}">🍳 Cocinar</button>` : ""}
-          </div>
+          ${dishes.length === 0 ? `
+            <button class="add-meal-btn" data-act="edit-meal" data-slot="${slot.id}">
+              <span class="add-meal-plus">+</span>
+              <span>Planificar ${slot.label.toLowerCase()}</span>
+            </button>
+          ` : `
+            <button class="mini-link" data-act="edit-meal" data-slot="${slot.id}" style="margin-top:8px;">+ Añadir otro plato</button>
+          `}
+          ${aggIng.length ? `<div class="meal-actions"><button class="btn btn-primary" data-act="cook-meal" data-slot="${slot.id}">🍳 Cocinar ${slot.label.toLowerCase()}</button></div>` : ""}
         </div>
       </div>`;
   });
   $("#menuBody").innerHTML = html;
 
   $("#btnManageRecipes")?.addEventListener("click", openRecipesSheet);
-  $("#btnSuggest")?.addEventListener("click", openSuggestionsSheet);
-  $("#btnInspiration")?.addEventListener("click", () => openInspirationSheet());
   $("#btnImportWeek")?.addEventListener("click", () => openImportWeekSheet());
-  $$('[data-act="edit-meal"]').forEach(b => b.addEventListener("click", () => openMealSheet(dateStr, b.dataset.slot)));
-  $$('[data-act="clear-meal"]').forEach(b => b.addEventListener("click", () => clearMealSlot(dateStr, b.dataset.slot)));
+  $$('[data-act="edit-meal"]').forEach(b => b.addEventListener("click", () => {
+    const idx = b.dataset.idx !== undefined ? Number(b.dataset.idx) : null;
+    openMealSheet(dateStr, b.dataset.slot, idx);
+  }));
+  $$('[data-act="remove-dish"]').forEach(b => b.addEventListener("click", e => {
+    e.stopPropagation();
+    removeDish(dateStr, b.dataset.slot, Number(b.dataset.idx));
+  }));
   $$('[data-act="cook-meal"]').forEach(b => b.addEventListener("click", () => cookMeal(dateStr, b.dataset.slot)));
 }
 
 function cookMeal(dateStr, slotId) {
-  const meal = (menuByDate[dateStr] || {})[slotId];
-  const recipe = meal && meal.recipeId ? recipes.find(r => r.id === meal.recipeId) : null;
-  if (!recipe) return;
-  const linkedIng = (recipe.ingredients || []).filter(i => i.productId && i.amount != null);
-  if (linkedIng.length === 0) return;
-  const willGoNegative = linkedIng.some(ing => {
-    const p = products.find(x => x.id === ing.productId);
-    return p && (p.stock - ing.amount) < 0;
+  const dishes = getDishes(dateStr, slotId);
+  const aggByProduct = {};
+  dishes.forEach(d => {
+    if (!d.recipeId) return;
+    const r = recipes.find(x => x.id === d.recipeId);
+    if (!r) return;
+    (r.ingredients || []).forEach(ing => {
+      if (!ing.productId || ing.amount == null) return;
+      aggByProduct[ing.productId] = (aggByProduct[ing.productId] || 0) + ing.amount;
+    });
   });
+  const entries = Object.entries(aggByProduct);
+  if (entries.length === 0) return;
+  const willGoNegative = entries.some(([pid, amount]) => {
+    const p = products.find(x => x.id === pid);
+    return p && (p.stock - amount) < 0;
+  });
+  const slotLabel = MEAL_SLOTS.find(s => s.id === slotId)?.label || "";
   openConfirm(
-    "Cocinar " + recipe.name,
-    `Se restará de tu inventario lo que usa esta receta.${willGoNegative ? " Ojo: algún ingrediente se quedará por debajo de 0 — parece que no tenías suficiente." : ""}`,
+    "Cocinar " + slotLabel.toLowerCase(),
+    `Se restará de tu inventario lo que usan los platos de esta franja.${willGoNegative ? " Ojo: algún ingrediente se quedará por debajo de 0 — parece que no tenías suficiente." : ""}`,
     "Cocinar",
     () => {
-      linkedIng.forEach(ing => {
-        const p = products.find(x => x.id === ing.productId);
+      entries.forEach(([pid, amount]) => {
+        const p = products.find(x => x.id === pid);
         if (!p) return;
-        const next = Math.round((p.stock - ing.amount + Number.EPSILON) * 100) / 100;
+        const next = Math.round((p.stock - amount + Number.EPSILON) * 100) / 100;
         updateProduct(p.id, { stock: next });
       });
       closeSheet();
@@ -375,20 +426,37 @@ function frostWarningsFor(recipeId) {
   return names;
 }
 
-function openMealSheet(dateStr, slotId) {
+function openMealSheet(dateStr, slotId, dishIndex) {
   const slotLabel = MEAL_SLOTS.find(s=>s.id===slotId).label;
   const dayLabel = labelFor(selectedDayOffset).dname;
+  const isEditingDish = dishIndex !== null && dishIndex !== undefined;
+  const currentDish = isEditingDish ? getDishes(dateStr, slotId)[dishIndex] : null;
+
+  const applyDish = (value) => {
+    const dishes = getDishes(dateStr, slotId);
+    if (isEditingDish) dishes[dishIndex] = value;
+    else dishes.push(value);
+    saveDishes(dateStr, slotId, dishes);
+  };
 
   const renderHome = () => {
     const html = `
       <div class="overlay" id="ov">
         <div class="sheet">
-          <h3>${slotLabel} — ${escapeHtml(dayLabel)}</h3>
+          <h3>${isEditingDish ? "Modificar plato" : "Añadir plato"} · ${slotLabel} — ${escapeHtml(dayLabel)}</h3>
           <div class="option-card" id="opt-existing">
             <div class="oc-icon">📖</div>
             <div class="oc-text">
               <div class="oc-title">Elegir receta guardada</div>
               <div class="oc-sub">${recipes.length ? `${recipes.length} receta(s) en tu recetario` : "Aún no tienes ninguna guardada"}</div>
+            </div>
+            <div class="oc-chevron">›</div>
+          </div>
+          <div class="option-card" id="opt-suggest">
+            <div class="oc-icon">💡</div>
+            <div class="oc-text">
+              <div class="oc-title">Qué puedo cocinar</div>
+              <div class="oc-sub">Recetas ordenadas por lo que ya tienes</div>
             </div>
             <div class="oc-chevron">›</div>
           </div>
@@ -425,9 +493,10 @@ function openMealSheet(dateStr, slotId) {
     $("#m-cancel").addEventListener("click", closeSheet);
     $("#ov").addEventListener("click", e => { if (e.target.id === "ov") closeSheet(); });
     $("#opt-existing").addEventListener("click", renderPickExisting);
+    $("#opt-suggest").addEventListener("click", () => openSuggestionsSheet());
     $("#opt-new").addEventListener("click", () => {
       openRecipeEditor(null, (id, name) => {
-        setMealSlot(dateStr, slotId, { recipeId: id, recipeName: name });
+        applyDish({ recipeId: id, recipeName: name });
       });
     });
     $("#opt-inspiration").addEventListener("click", () => openInspirationSheet());
@@ -460,19 +529,18 @@ function openMealSheet(dateStr, slotId) {
     $("#ovR").addEventListener("click", e => { if (e.target.id === "ovR") closeSheet(); });
     $$('[data-rid]').forEach(card => card.addEventListener("click", () => {
       const r = recipes.find(x => x.id === card.dataset.rid);
-      setMealSlot(dateStr, slotId, { recipeId: r.id, recipeName: r.name });
+      applyDish({ recipeId: r.id, recipeName: r.name });
       closeSheet();
     }));
   };
 
   const renderFreeText = () => {
-    const current = (menuByDate[dateStr] || {})[slotId];
     const html = `
       <div class="overlay" id="ovF">
         <div class="sheet">
-          <h3>${slotLabel} — ${escapeHtml(dayLabel)}</h3>
+          <h3>${isEditingDish ? "Modificar plato" : "Añadir plato"} · ${slotLabel} — ${escapeHtml(dayLabel)}</h3>
           <div class="field"><label>Escribe algo suelto (sin receta guardada)</label>
-            <input type="text" id="m-free" placeholder="Ej. Cenar fuera, pizza congelada…" value="${current && !current.recipeId ? escapeHtml(current.freeText||"") : ""}">
+            <input type="text" id="m-free" placeholder="Ej. Cenar fuera, pizza congelada…" value="${currentDish && !currentDish.recipeId ? escapeHtml(currentDish.freeText||"") : ""}">
           </div>
           <div class="sheet-actions">
             <button class="btn btn-secondary" id="m-back">‹ Volver</button>
@@ -487,7 +555,7 @@ function openMealSheet(dateStr, slotId) {
     $("#m-save").addEventListener("click", () => {
       const free = $("#m-free").value.trim();
       if (!free) { closeSheet(); return; }
-      setMealSlot(dateStr, slotId, { recipeId: null, freeText: free });
+      applyDish({ recipeId: null, freeText: free });
       closeSheet();
     });
   };
@@ -788,7 +856,9 @@ function openSuggestionsSheet() {
   $$('[data-act="sug-slot"]').forEach(b => b.addEventListener("click", () => {
     const r = recipes.find(x => x.id === b.dataset.rid);
     if (!r) return;
-    setMealSlot(dateStr, b.dataset.slot, { recipeId: r.id, recipeName: r.name });
+    const dishes = getDishes(dateStr, b.dataset.slot);
+    dishes.push({ recipeId: r.id, recipeName: r.name });
+    saveDishes(dateStr, b.dataset.slot, dishes);
     closeSheet();
   }));
 }
