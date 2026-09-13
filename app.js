@@ -22,6 +22,7 @@ let inspirations = [];
 let shoppingChecked = {}; // { productId: true }
 let selectedDayOffset = 0;
 let selectedLocation = "Todas";
+let dishAddSearch = {}; // "slot-idx" -> { open, filter }
 let syncFlags = { products: false, recipes: false, menu: false, history: false, shopping: false, inspirations: false };
 
 const $ = sel => document.querySelector(sel);
@@ -308,57 +309,76 @@ function renderMenu() {
   let html = "";
   MEAL_SLOTS.forEach(slot => {
     const dishes = getDishes(dateStr, slot.id);
-
-    // Ingredientes agregados de todos los platos de esta franja (sumando si se repite el mismo producto).
-    // Si un plato ya tiene ajustados sus ingredientes (customIngredients), se usa eso; si no, se usa
-    // el conjunto habitual completo de la receta como vista previa orientativa.
-    const aggByProduct = {};
     const frostNames = new Set();
-    dishes.forEach(d => {
-      if (!d.recipeId) return;
-      const r = recipes.find(x => x.id === d.recipeId);
-      if (!r) return;
-      const source = d.customIngredients || Object.fromEntries((r.ingredients || []).filter(i => i.productId && i.amount != null).map(i => [i.productId, i.amount]));
-      Object.entries(source).forEach(([pid, amt]) => {
-        aggByProduct[pid] = (aggByProduct[pid] || 0) + amt;
-      });
-      frostWarningsFor(r.id).forEach(n => frostNames.add(n));
-    });
-    const aggIng = Object.entries(aggByProduct).map(([pid, amount]) => ({ productId: pid, amount }));
+    const aggByProduct = {}; // para el botón "Cocinar" de toda la franja
+
+    const dishBlocks = dishes.map((d, idx) => {
+      const name = d.recipeName || d.freeText || "";
+      const recipe = d.recipeId ? recipes.find(r => r.id === d.recipeId) : null;
+      const pool = recipe ? Object.fromEntries((recipe.ingredients || []).filter(i => i.productId && i.amount != null).map(i => [i.productId, i.amount])) : {};
+      const active = d.customIngredients || pool; // lo que se muestra y se puede editar en línea
+
+      Object.entries(active).forEach(([pid, amt]) => { aggByProduct[pid] = (aggByProduct[pid] || 0) + amt; });
+      if (recipe) {
+        Object.keys(active).forEach(pid => {
+          const p = products.find(x => x.id === pid);
+          if (p && p.needsDefrost && p.location === "Congelador") frostNames.add(p.name);
+        });
+      }
+
+      const rows = Object.entries(active).map(([pid, amt]) => {
+        const p = products.find(x => x.id === pid);
+        if (!p) return "";
+        const after = Math.round((p.stock - (Number(amt) || 0) + Number.EPSILON) * 100) / 100;
+        const u = unitOf(p).short;
+        return `
+          <div class="dish-ing-row">
+            <span class="dish-ing-name">${escapeHtml(p.name)}</span>
+            <input type="number" step="any" min="0" data-dish-ing-amount="${pid}" data-slot="${slot.id}" data-idx="${idx}" value="${amt}">
+            <span class="ing-unit">${u}</span>
+            <button class="dish-remove" data-act="remove-dish-ing" data-slot="${slot.id}" data-idx="${idx}" data-pid="${pid}" title="No usado esta vez">×</button>
+          </div>
+          <div style="font-size:11px;color:${after<0?"var(--danger)":"var(--text-soft)"};margin:-4px 0 6px 2px;">tienes ${fmtNum(p.stock)} ${u} · quedaría ${fmtNum(after)} ${u}</div>`;
+      }).join("");
+
+      return `
+        <div class="dish-row">
+          <span class="dish-name" data-act="edit-meal" data-slot="${slot.id}" data-idx="${idx}">${escapeHtml(name)}</span>
+          <button class="dish-remove" data-act="remove-dish" data-slot="${slot.id}" data-idx="${idx}" title="Quitar este plato">×</button>
+        </div>
+        ${rows}
+        ${recipe ? (() => {
+          const key = `${slot.id}-${idx}`;
+          const state = dishAddSearch[key];
+          if (!state || !state.open) {
+            return `<button class="mini-link dish-add-ing" data-act="toggle-add-ing" data-slot="${slot.id}" data-idx="${idx}">+ Añadir ingrediente</button>`;
+          }
+          const candidates = products
+            .filter(p => !(p.id in active) && p.name.toLowerCase().includes((state.filter||"").toLowerCase()))
+            .sort((a, b) => a.name.localeCompare(b.name, "es"))
+            .slice(0, 6);
+          return `
+            <input type="text" class="dish-add-search" data-slot="${slot.id}" data-idx="${idx}" placeholder="Buscar producto…" value="${escapeHtml(state.filter||"")}" style="margin-bottom:6px;">
+            <div style="border:1px solid var(--border);border-radius:var(--radius-s);margin-bottom:10px;max-height:160px;overflow-y:auto;">
+              ${candidates.length === 0 ? `<div style="padding:10px;font-size:12px;color:var(--text-soft);">Sin coincidencias.</div>` : candidates.map(p => `
+                <div class="pick-row" data-act="pick-dish-ing" data-slot="${slot.id}" data-idx="${idx}" data-pid="${p.id}" style="cursor:pointer;padding:8px 10px;">
+                  <div class="pick-name">${escapeHtml(p.name)}</div>
+                  <span class="ing-unit">${unitOf(p).short}</span>
+                </div>`).join("")}
+            </div>
+          `;
+        })() : ""}
+      `;
+    }).join("");
+
+    const aggIng = Object.entries(aggByProduct);
 
     html += `
       <div class="meal-card" data-slot="${slot.id}">
         <div class="slot-band" style="background:${slot.color};">${slot.label}</div>
         <div class="meal-card-body">
-          ${dishes.map((d, idx) => {
-            const name = d.recipeName || d.freeText || "";
-            const recipe = d.recipeId ? recipes.find(r => r.id === d.recipeId) : null;
-            const hasPool = recipe && (recipe.ingredients || []).some(i => i.productId && i.amount != null);
-            const adjusted = !!d.customIngredients;
-            return `
-            <div class="dish-row">
-              <span class="dish-name" data-act="edit-meal" data-slot="${slot.id}" data-idx="${idx}">${escapeHtml(name)}</span>
-              ${hasPool ? `<button class="dish-adjust ${adjusted ? "on" : ""}" data-act="adjust-dish" data-slot="${slot.id}" data-idx="${idx}" title="Ajustar ingredientes">✏️${adjusted ? "" : " ajustar"}</button>` : ""}
-              <button class="dish-remove" data-act="remove-dish" data-slot="${slot.id}" data-idx="${idx}" title="Quitar este plato">×</button>
-            </div>`;
-          }).join("")}
+          ${dishBlocks}
           ${frostNames.size ? `<div class="frost-note">❄️ Sacar del congelador: ${[...frostNames].map(escapeHtml).join(", ")}</div>` : ""}
-          ${aggIng.length ? `
-            <table class="ing-table">
-              ${aggIng.map(ing => {
-                const p = products.find(x => x.id === ing.productId);
-                if (!p) return "";
-                const after = Math.round((p.stock - ing.amount + Number.EPSILON) * 100) / 100;
-                const u = unitOf(p).short;
-                return `<tr>
-                  <td>${escapeHtml(p.name)}</td>
-                  <td class="ing-need">−${fmtNum(ing.amount)} ${u}</td>
-                  <td>tienes ${fmtNum(p.stock)}</td>
-                  <td class="${after < 0 ? "ing-after-neg" : "ing-after"}">quedaría ${fmtNum(after)} ${u}</td>
-                </tr>`;
-              }).join("")}
-            </table>
-          ` : ""}
           ${dishes.length === 0 ? `
             <button class="add-meal-btn" data-act="edit-meal" data-slot="${slot.id}">
               <span class="add-meal-plus">+</span>
@@ -377,9 +397,61 @@ function renderMenu() {
     const idx = b.dataset.idx !== undefined ? Number(b.dataset.idx) : null;
     openMealSheet(dateStr, b.dataset.slot, idx);
   }));
-  $$('[data-act="adjust-dish"]').forEach(b => b.addEventListener("click", e => {
+  $$('[data-dish-ing-amount]').forEach(inp => {
+    inp.addEventListener("click", e => e.stopPropagation());
+    inp.addEventListener("focus", () => inp.select());
+    inp.addEventListener("change", () => {
+      const { slot, idx } = inp.dataset;
+      const dishes = getDishes(dateStr, slot);
+      const d = dishes[Number(idx)];
+      const recipe = d.recipeId ? recipes.find(r => r.id === d.recipeId) : null;
+      const pool = recipe ? Object.fromEntries((recipe.ingredients || []).filter(i => i.productId && i.amount != null).map(i => [i.productId, i.amount])) : {};
+      const active = { ...(d.customIngredients || pool) };
+      active[inp.dataset.dishIngAmount] = inp.value === "" ? 0 : Number(inp.value);
+      dishes[Number(idx)] = { ...d, customIngredients: active };
+      saveDishes(dateStr, slot, dishes);
+    });
+  });
+  $$('[data-act="remove-dish-ing"]').forEach(btn => btn.addEventListener("click", e => {
     e.stopPropagation();
-    editDishIngredients(dateStr, b.dataset.slot, Number(b.dataset.idx));
+    const { slot, idx, pid } = btn.dataset;
+    const dishes = getDishes(dateStr, slot);
+    const d = dishes[Number(idx)];
+    const recipe = d.recipeId ? recipes.find(r => r.id === d.recipeId) : null;
+    const pool = recipe ? Object.fromEntries((recipe.ingredients || []).filter(i => i.productId && i.amount != null).map(i => [i.productId, i.amount])) : {};
+    const active = { ...(d.customIngredients || pool) };
+    delete active[pid];
+    dishes[Number(idx)] = { ...d, customIngredients: active };
+    saveDishes(dateStr, slot, dishes);
+  }));
+  $$('[data-act="toggle-add-ing"]').forEach(b => b.addEventListener("click", e => {
+    e.stopPropagation();
+    const key = `${b.dataset.slot}-${b.dataset.idx}`;
+    dishAddSearch[key] = { open: true, filter: "" };
+    renderMenu();
+  }));
+  const dsInput = $(".dish-add-search");
+  if (dsInput) {
+    dsInput.focus();
+    dsInput.selectionStart = dsInput.selectionEnd = dsInput.value.length;
+    dsInput.addEventListener("click", e => e.stopPropagation());
+    dsInput.addEventListener("input", e => {
+      const key = `${dsInput.dataset.slot}-${dsInput.dataset.idx}`;
+      dishAddSearch[key] = { open: true, filter: e.target.value };
+      renderMenu();
+    });
+  }
+  $$('[data-act="pick-dish-ing"]').forEach(row => row.addEventListener("click", e => {
+    e.stopPropagation();
+    const { slot, idx, pid } = row.dataset;
+    const dishes = getDishes(dateStr, slot);
+    const d = dishes[Number(idx)];
+    const recipe = d.recipeId ? recipes.find(r => r.id === d.recipeId) : null;
+    const pool = recipe ? Object.fromEntries((recipe.ingredients || []).filter(i => i.productId && i.amount != null).map(i => [i.productId, i.amount])) : {};
+    const active = { ...(d.customIngredients || pool), [pid]: 1 };
+    dishes[Number(idx)] = { ...d, customIngredients: active };
+    delete dishAddSearch[`${slot}-${idx}`];
+    saveDishes(dateStr, slot, dishes);
   }));
   $$('[data-act="remove-dish"]').forEach(b => b.addEventListener("click", e => {
     e.stopPropagation();
@@ -491,7 +563,7 @@ function openIngredientPickerSheet({ title, hint, pool, initialSelected, confirm
 function cookMeal(dateStr, slotId) {
   const dishes = getDishes(dateStr, slotId);
   const pool = {}; // productId -> cantidad habitual (el conjunto de ingredientes que suele usar esta franja)
-  const initialSelected = {}; // se precarga con lo ya ajustado por plato, si lo hay
+  const initialSelected = {}; // parte de lo que ya se ve activo en la vista previa de cada plato
   dishes.forEach(d => {
     if (!d.recipeId) return;
     const r = recipes.find(x => x.id === d.recipeId);
@@ -500,11 +572,11 @@ function cookMeal(dateStr, slotId) {
       if (!ing.productId || ing.amount == null) return;
       pool[ing.productId] = (pool[ing.productId] || 0) + ing.amount;
     });
-    if (d.customIngredients) {
-      Object.entries(d.customIngredients).forEach(([pid, amt]) => {
-        initialSelected[pid] = (initialSelected[pid] || 0) + amt;
-      });
-    }
+    const dishPool = Object.fromEntries((r.ingredients || []).filter(i => i.productId && i.amount != null).map(i => [i.productId, i.amount]));
+    const active = d.customIngredients || dishPool;
+    Object.entries(active).forEach(([pid, amt]) => {
+      initialSelected[pid] = (initialSelected[pid] || 0) + amt;
+    });
   });
   if (Object.keys(pool).length === 0) return;
 
@@ -542,36 +614,6 @@ function cookMeal(dateStr, slotId) {
           closeSheet();
         }
       );
-    }
-  });
-}
-
-function editDishIngredients(dateStr, slotId, dishIndex) {
-  const dishes = getDishes(dateStr, slotId);
-  const dish = dishes[dishIndex];
-  if (!dish || !dish.recipeId) return;
-  const recipe = recipes.find(r => r.id === dish.recipeId);
-  if (!recipe) return;
-  const pool = {};
-  (recipe.ingredients || []).forEach(ing => {
-    if (!ing.productId || ing.amount == null) return;
-    pool[ing.productId] = ing.amount;
-  });
-  if (Object.keys(pool).length === 0) return;
-  const initialSelected = dish.customIngredients ? { ...dish.customIngredients } : {};
-
-  openIngredientPickerSheet({
-    title: "Ajustar ingredientes",
-    hint: `Marca lo que vais a usar en "${dish.recipeName || recipe.name}" esta vez — se guarda en el plan, así "Cocinar" ya viene así de precargado.`,
-    pool,
-    initialSelected,
-    confirmLabel: "Guardar",
-    onConfirm: (entries) => {
-      const customIngredients = Object.fromEntries(entries);
-      const freshDishes = getDishes(dateStr, slotId);
-      freshDishes[dishIndex] = { ...freshDishes[dishIndex], customIngredients };
-      saveDishes(dateStr, slotId, freshDishes);
-      closeSheet();
     }
   });
 }
