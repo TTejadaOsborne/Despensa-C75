@@ -26,10 +26,10 @@ export const LOCATIONS = ["Nevera", "Despensa", "Congelador", "Otros"];
 
 // Unidad de medida por producto, con el incremento (+/-) que tiene sentido para cada una
 export const UNITS = [
-  { id: "ud",      label: "unidades",     short: "uds",    step: 1 },
-  { id: "bolsa",   label: "bolsas",       short: "bolsas", step: 1 },
-  { id: "bote",    label: "botes/tarros", short: "botes",  step: 1 },
-  { id: "paquete", label: "paquetes",     short: "paq.",   step: 1 },
+  { id: "ud",      label: "unidades",     short: "uds",    step: 0.5 },
+  { id: "bolsa",   label: "bolsas",       short: "bolsas", step: 0.5 },
+  { id: "bote",    label: "botes/tarros", short: "botes",  step: 0.5 },
+  { id: "paquete", label: "paquetes",     short: "paq.",   step: 0.5 },
   { id: "g",       label: "gramos (g)",   short: "g",      step: 100 },
   { id: "kg",      label: "kilos (kg)",   short: "kg",     step: 0.5 },
   { id: "ml",      label: "mililitros (ml)", short: "ml",  step: 100 },
