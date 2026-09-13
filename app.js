@@ -70,6 +70,7 @@ function switchView(name) {
   $$(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.view === name));
   $$(".view").forEach(v => v.classList.toggle("active", v.id === "view-" + name));
   $("#fabAdd").style.display = name === "inventario" ? "flex" : "none";
+  $("#fabNewRecipe").style.display = name === "menu" ? "flex" : "none";
 }
 
 // ---------- Fechas ----------
@@ -178,6 +179,7 @@ $("#invList").addEventListener("touchend", () => clearTimeout(pressTimer));
 $("#invList").addEventListener("touchmove", () => clearTimeout(pressTimer));
 
 $("#fabAdd").addEventListener("click", () => openProductSheet(null));
+$("#fabNewRecipe").addEventListener("click", () => openRecipeEditor(null));
 
 function openProductSheet(product) {
   const editing = !!product;
@@ -374,49 +376,123 @@ function frostWarningsFor(recipeId) {
 }
 
 function openMealSheet(dateStr, slotId) {
-  const current = (menuByDate[dateStr] || {})[slotId];
-  const html = `
-    <div class="overlay" id="ov">
-      <div class="sheet">
-        <h3>${MEAL_SLOTS.find(s=>s.id===slotId).label} — ${escapeHtml(labelFor(selectedDayOffset).dname)}</h3>
-        <button class="btn btn-secondary btn-block" id="m-inspiration" style="margin-bottom:14px;">💭 Ver ideas guardadas</button>
-        <div class="field"><label>Elegir receta guardada</label>
-          <select id="m-recipe">
-            <option value="">— Ninguna —</option>
-            ${recipes.map(r => `<option value="${r.id}" ${current?.recipeId===r.id?"selected":""}>${escapeHtml(r.name)}</option>`).join("")}
-          </select>
+  const slotLabel = MEAL_SLOTS.find(s=>s.id===slotId).label;
+  const dayLabel = labelFor(selectedDayOffset).dname;
+
+  const renderHome = () => {
+    const html = `
+      <div class="overlay" id="ov">
+        <div class="sheet">
+          <h3>${slotLabel} — ${escapeHtml(dayLabel)}</h3>
+          <div class="option-card" id="opt-existing">
+            <div class="oc-icon">📖</div>
+            <div class="oc-text">
+              <div class="oc-title">Elegir receta guardada</div>
+              <div class="oc-sub">${recipes.length ? `${recipes.length} receta(s) en tu recetario` : "Aún no tienes ninguna guardada"}</div>
+            </div>
+            <div class="oc-chevron">›</div>
+          </div>
+          <div class="option-card" id="opt-new">
+            <div class="oc-icon">✨</div>
+            <div class="oc-text">
+              <div class="oc-title">Crear receta nueva</div>
+              <div class="oc-sub">Con ingredientes y cantidades de tu despensa</div>
+            </div>
+            <div class="oc-chevron">›</div>
+          </div>
+          <div class="option-card" id="opt-inspiration">
+            <div class="oc-icon">💭</div>
+            <div class="oc-text">
+              <div class="oc-title">Buscar inspiración</div>
+              <div class="oc-sub">Tus enlaces guardados</div>
+            </div>
+            <div class="oc-chevron">›</div>
+          </div>
+          <div class="option-card" id="opt-free">
+            <div class="oc-icon">✏️</div>
+            <div class="oc-text">
+              <div class="oc-title">Apunte rápido</div>
+              <div class="oc-sub">Solo un texto, sin receta guardada</div>
+            </div>
+            <div class="oc-chevron">›</div>
+          </div>
+          <div class="sheet-actions" style="margin-top:4px;">
+            <button class="btn btn-secondary btn-block" id="m-cancel">Cancelar</button>
+          </div>
         </div>
-        <div style="margin:-6px 0 14px;"><button class="mini-link" id="m-newRecipe">+ Añadir la receta completa (no solo el nombre)</button></div>
-        <div class="field"><label>O escribe algo suelto (sin receta guardada)</label>
-          <input type="text" id="m-free" placeholder="Ej. Cenar fuera, pizza congelada…" value="${current && !current.recipeId ? escapeHtml(current.freeText||"") : ""}">
-        </div>
-        <div class="sheet-actions">
-          <button class="btn btn-secondary" id="m-cancel">Cancelar</button>
-          <button class="btn btn-primary" id="m-save">Guardar</button>
-        </div>
-      </div>
-    </div>`;
-  $("#modalRoot").innerHTML = html;
-  $("#m-cancel").addEventListener("click", closeSheet);
-  $("#ov").addEventListener("click", e => { if (e.target.id === "ov") closeSheet(); });
-  $("#m-inspiration").addEventListener("click", () => openInspirationSheet());
-  $("#m-recipe").addEventListener("change", () => { if ($("#m-recipe").value) $("#m-free").value = ""; });
-  $("#m-free").addEventListener("input", () => { if ($("#m-free").value) $("#m-recipe").value = ""; });
-  $("#m-newRecipe").addEventListener("click", () => {
-    openRecipeEditor(null, (id, name) => {
-      setMealSlot(dateStr, slotId, { recipeId: id, recipeName: name });
+      </div>`;
+    $("#modalRoot").innerHTML = html;
+    $("#m-cancel").addEventListener("click", closeSheet);
+    $("#ov").addEventListener("click", e => { if (e.target.id === "ov") closeSheet(); });
+    $("#opt-existing").addEventListener("click", renderPickExisting);
+    $("#opt-new").addEventListener("click", () => {
+      openRecipeEditor(null, (id, name) => {
+        setMealSlot(dateStr, slotId, { recipeId: id, recipeName: name });
+      });
     });
-  });
-  $("#m-save").addEventListener("click", () => {
-    const rid = $("#m-recipe").value;
-    const free = $("#m-free").value.trim();
-    if (!rid && !free) { closeSheet(); return; }
-    const value = rid
-      ? { recipeId: rid, recipeName: recipes.find(r => r.id === rid)?.name || "" }
-      : { recipeId: null, freeText: free };
-    setMealSlot(dateStr, slotId, value);
-    closeSheet();
-  });
+    $("#opt-inspiration").addEventListener("click", () => openInspirationSheet());
+    $("#opt-free").addEventListener("click", renderFreeText);
+  };
+
+  const renderPickExisting = () => {
+    const html = `
+      <div class="overlay" id="ovR">
+        <div class="sheet">
+          <h3>${slotLabel} — ${escapeHtml(dayLabel)}</h3>
+          ${recipes.length === 0
+            ? emptyState("📖", "Sin recetas guardadas", "Vuelve atrás y crea la primera con \"Crear receta nueva\".")
+            : recipes.map(r => `
+              <div class="option-card" data-rid="${r.id}">
+                <div class="oc-icon">🍽️</div>
+                <div class="oc-text">
+                  <div class="oc-title">${escapeHtml(r.name)}</div>
+                  <div class="oc-sub">${(r.ingredients||[]).length} ingrediente(s)${r.url ? " · con enlace" : ""}</div>
+                </div>
+                <div class="oc-chevron">›</div>
+              </div>`).join("")}
+          <div class="sheet-actions" style="margin-top:4px;">
+            <button class="btn btn-secondary btn-block" id="m-back">‹ Volver</button>
+          </div>
+        </div>
+      </div>`;
+    $("#modalRoot").innerHTML = html;
+    $("#m-back").addEventListener("click", renderHome);
+    $("#ovR").addEventListener("click", e => { if (e.target.id === "ovR") closeSheet(); });
+    $$('[data-rid]').forEach(card => card.addEventListener("click", () => {
+      const r = recipes.find(x => x.id === card.dataset.rid);
+      setMealSlot(dateStr, slotId, { recipeId: r.id, recipeName: r.name });
+      closeSheet();
+    }));
+  };
+
+  const renderFreeText = () => {
+    const current = (menuByDate[dateStr] || {})[slotId];
+    const html = `
+      <div class="overlay" id="ovF">
+        <div class="sheet">
+          <h3>${slotLabel} — ${escapeHtml(dayLabel)}</h3>
+          <div class="field"><label>Escribe algo suelto (sin receta guardada)</label>
+            <input type="text" id="m-free" placeholder="Ej. Cenar fuera, pizza congelada…" value="${current && !current.recipeId ? escapeHtml(current.freeText||"") : ""}">
+          </div>
+          <div class="sheet-actions">
+            <button class="btn btn-secondary" id="m-back">‹ Volver</button>
+            <button class="btn btn-primary" id="m-save">Guardar</button>
+          </div>
+        </div>
+      </div>`;
+    $("#modalRoot").innerHTML = html;
+    $("#m-back").addEventListener("click", renderHome);
+    $("#ovF").addEventListener("click", e => { if (e.target.id === "ovF") closeSheet(); });
+    $("#m-free").focus();
+    $("#m-save").addEventListener("click", () => {
+      const free = $("#m-free").value.trim();
+      if (!free) { closeSheet(); return; }
+      setMealSlot(dateStr, slotId, { recipeId: null, freeText: free });
+      closeSheet();
+    });
+  };
+
+  renderHome();
 }
 
 // ---------- Recetas ----------
