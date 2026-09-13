@@ -28,8 +28,7 @@ const $ = sel => document.querySelector(sel);
 const $$ = sel => Array.from(document.querySelectorAll(sel));
 const escapeHtml = s => (s || "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
 // Un producto entra en "por comprar" solo si está bajo mínimo Y tiene activo el seguimiento de compra.
-// trackShopping !== false trata a los productos antiguos (sin este campo aún) como activados, por compatibilidad.
-const needsRestock = p => p.stock <= p.min && p.trackShopping !== false;
+const needsRestock = p => p.stock <= p.min;
 const unitOf = p => UNIT_MAP[p.unit] || UNIT_MAP.ud;
 const fmtNum = n => { const r = Math.round((n + Number.EPSILON) * 100) / 100; return Number.isInteger(r) ? String(r) : String(r); };
 const fmtQty = p => { const u = unitOf(p); return `${fmtNum(p.stock)} ${u.short}`; };
@@ -75,7 +74,7 @@ listenInspirations(items => { inspirations = items; syncFlags.inspirations = tru
 
 function updateSyncStatus() {
   const allOk = Object.values(syncFlags).every(Boolean);
-  $("#syncStatus").textContent = allOk ? "Sincronizado con Beatriz" : "Sincronizando…";
+  $("#syncStatus").textContent = allOk ? "" : "Sincronizando…";
 }
 
 // ---------- Navegación de pestañas ----------
@@ -106,8 +105,6 @@ function labelFor(offset) {
 // ==================================================================
 // RENDER: INVENTARIO
 // ==================================================================
-let selectMode = false;
-let selectedIds = new Set();
 let selectedLocation = "Todas";
 
 function renderInventario() {
@@ -123,7 +120,6 @@ function renderInventario() {
   if (products.length === 0) {
     $("#invLocTabs").innerHTML = "";
     $("#invList").innerHTML = emptyState("🧺", "Tu despensa está vacía", "Pulsa el botón + para añadir tu primer producto.");
-    $("#invSelectBar").innerHTML = "";
     return;
   }
 
@@ -137,29 +133,6 @@ function renderInventario() {
   }).join("");
   $$(".loc-tab").forEach(b => b.addEventListener("click", () => { selectedLocation = b.dataset.loc; renderInventario(); }));
 
-  // Barra de selección múltiple
-  if (selectMode) {
-    const n = selectedIds.size;
-    $("#invSelectBar").innerHTML = `
-      <div class="tip" style="display:flex;align-items:center;gap:10px;margin:0 0 12px;">
-        <div style="flex:1;font-size:13px;"><b>${n}</b> seleccionado(s)</div>
-        <button class="mini-link" id="selCancel">Cancelar</button>
-      </div>
-      <div style="display:flex;gap:8px;margin-bottom:14px;">
-        <button class="btn btn-secondary" id="selTrackOff" style="flex:1;font-size:13px;padding:10px;" ${n===0?"disabled":""}>Desactivar seguimiento</button>
-        <button class="btn btn-secondary" id="selTrackOn" style="flex:1;font-size:13px;padding:10px;" ${n===0?"disabled":""}>Activar seguimiento</button>
-      </div>`;
-    $("#selCancel").addEventListener("click", () => { selectMode = false; selectedIds.clear(); renderInventario(); });
-    $("#selTrackOff").addEventListener("click", () => bulkSetTracking(false));
-    $("#selTrackOn").addEventListener("click", () => bulkSetTracking(true));
-  } else {
-    $("#invSelectBar").innerHTML = `
-      <div style="text-align:right;margin-bottom:10px;">
-        <button class="mini-link" id="selStart">Seleccionar varios</button>
-      </div>`;
-    $("#selStart").addEventListener("click", () => { selectMode = true; renderInventario(); });
-  }
-
   const visible = selectedLocation === "Todas" ? products : products.filter(p => p.location === selectedLocation);
   const byLocation = {};
   visible.forEach(p => { (byLocation[p.location] ||= []).push(p); });
@@ -172,25 +145,22 @@ function renderInventario() {
     else html += `<div class="zone-group">`;
     byLocation[loc].forEach(p => {
       const low = needsRestock(p);
-      const checked = selectedIds.has(p.id);
       html += `
         <div class="product-row compact ${low ? "low" : ""}" data-id="${p.id}">
-          ${selectMode ? `<div class="checkbox ${checked ? "on" : ""}" data-select="${p.id}">${checked ? "✓" : ""}</div>` : ""}
           <div class="product-info">
             <div class="product-name">${escapeHtml(p.name)}</div>
             <div class="product-meta">
               <span class="chip">${escapeHtml(p.zone)}</span>
               ${p.needsDefrost ? `<span class="chip frost">❄️ ${p.defrostHours}h antes</span>` : ""}
-              ${p.trackShopping === false ? `<span class="chip" style="background:#EDEAE0;color:var(--text-soft);">sin seguimiento</span>` : `<span>${fmtMin(p)}</span>`}
+              <span>${fmtMin(p)}</span>
             </div>
             ${p.note ? `<div style="font-size:10.5px;color:var(--text-soft);font-style:italic;margin-top:2px;">${escapeHtml(p.note)}</div>` : ""}
           </div>
-          ${selectMode ? "" : `
           <div class="stepper compact">
             <button data-act="dec" data-id="${p.id}">−</button>
             <span class="val">${fmtQty(p)}</span>
             <button data-act="inc" data-id="${p.id}">+</button>
-          </div>`}
+          </div>
         </div>`;
     });
     html += `</div>`;
@@ -198,32 +168,7 @@ function renderInventario() {
   $("#invList").innerHTML = html;
 }
 
-function bulkSetTracking(value) {
-  const ids = Array.from(selectedIds);
-  if (ids.length === 0) return;
-  openConfirm(
-    value ? "Activar seguimiento" : "Desactivar seguimiento",
-    `Se aplicará a ${ids.length} producto(s) seleccionado(s).`,
-    "Aplicar",
-    () => {
-      ids.forEach(id => updateProduct(id, { trackShopping: value }));
-      selectMode = false;
-      selectedIds.clear();
-      closeSheet();
-      renderInventario();
-    }
-  );
-}
-
 $("#invList").addEventListener("click", e => {
-  if (selectMode) {
-    const row = e.target.closest(".product-row");
-    if (!row) return;
-    const id = row.dataset.id;
-    if (selectedIds.has(id)) selectedIds.delete(id); else selectedIds.add(id);
-    renderInventario();
-    return;
-  }
   const btn = e.target.closest("button[data-act]");
   if (btn) {
     const p = products.find(x => x.id === btn.dataset.id);
@@ -239,7 +184,6 @@ $("#invList").addEventListener("click", e => {
 });
 let pressTimer = null;
 $("#invList").addEventListener("touchstart", e => {
-  if (selectMode) return;
   const row = e.target.closest(".product-row");
   if (!row) return;
   pressTimer = setTimeout(() => openProductSheet(products.find(x => x.id === row.dataset.id)), 480);
@@ -251,7 +195,7 @@ $("#fabAdd").addEventListener("click", () => openProductSheet(null));
 
 function openProductSheet(product) {
   const editing = !!product;
-  const p = product || { name: "", zone: ZONES[0], location: "Despensa", stock: 1, min: 1, unit: "ud", note: "", needsDefrost: false, defrostHours: 24, trackShopping: true };
+  const p = product || { name: "", zone: ZONES[0], location: "Despensa", stock: 1, min: 1, unit: "ud", note: "", needsDefrost: false, defrostHours: 24 };
   const html = `
     <div class="overlay" id="ov">
       <div class="sheet">
@@ -275,7 +219,6 @@ function openProductSheet(product) {
         <div class="field"><label>Nota (opcional) — ej. "cada bolsa lleva 4 filetes"</label>
           <input type="text" id="f-note" value="${escapeHtml(p.note || "")}" placeholder="Contenido de cada unidad, si ayuda a recordarlo">
         </div>
-        <div class="check-field"><input type="checkbox" id="f-track" ${p.trackShopping !== false ? "checked" : ""}><label for="f-track" style="margin:0;">Avisar y añadir a la lista de la compra cuando falte</label></div>
         <div class="check-field"><input type="checkbox" id="f-frost" ${p.needsDefrost?"checked":""}><label for="f-frost" style="margin:0;">Hay que sacarlo del congelador con antelación</label></div>
         <div class="field" id="f-frost-hours-wrap" style="display:${p.needsDefrost?"block":"none"};">
           <label>Horas de antelación</label><input type="number" id="f-frost-hours" value="${p.defrostHours}" min="1">
@@ -313,8 +256,7 @@ function openProductSheet(product) {
       min: Number($("#f-min").value) || 0,
       note: $("#f-note").value.trim(),
       needsDefrost: $("#f-frost").checked,
-      defrostHours: Number($("#f-frost-hours").value) || 24,
-      trackShopping: $("#f-track").checked
+      defrostHours: Number($("#f-frost-hours").value) || 24
     };
     if (editing) updateProduct(p.id, patch); else addProduct(patch);
     closeSheet();
@@ -1118,7 +1060,6 @@ function openImportMenuPdfSheet() {
               unit: it.unit,
               stock: 0,
               min: it.qty || 1,
-              trackShopping: true,
               note: "Importado del menú del nutricionista"
             });
           });

@@ -69,7 +69,6 @@ export async function addProduct(p) {
     note: p.note || "",
     needsDefrost: !!p.needsDefrost,
     defrostHours: Number(p.defrostHours) || 24,
-    trackShopping: p.trackShopping !== false,
     updatedAt: serverTimestamp()
   });
 }
