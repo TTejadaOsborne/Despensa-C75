@@ -73,9 +73,14 @@ function scrollToSelectedDay() {
     const container = $("#dayTabs");
     const activeTab = $(`.day-tab[data-offset="${selectedDayOffset}"]`);
     if (container && activeTab) {
-      container.scrollLeft = activeTab.offsetLeft - (container.clientWidth / 2) + (activeTab.clientWidth / 2);
+      const target = activeTab.offsetLeft - (container.clientWidth / 2) + (activeTab.clientWidth / 2);
+      if (typeof container.scrollTo === "function") {
+        container.scrollTo({ left: target, behavior: "auto" });
+      } else {
+        container.scrollLeft = target;
+      }
     }
-  }, 0);
+  }, 60);
 }
 
 function switchView(name) {
@@ -261,6 +266,7 @@ $("#invList").addEventListener("touchmove", () => clearTimeout(pressTimer));
 
 $("#fabAdd").addEventListener("click", () => openProductSheet(null));
 $("#fabNewRecipe").addEventListener("click", () => openRecipeEditor(null));
+$("#btnOpenCalendar").addEventListener("click", () => openCalendarPicker());
 
 function openProductSheet(product) {
   const editing = !!product;
@@ -388,7 +394,6 @@ function renderMenu() {
   }
   $("#dayTabs").innerHTML = tabs;
   $$(".day-tab").forEach(b => b.addEventListener("click", () => { selectedDayOffset = Number(b.dataset.offset); renderMenu(); scrollToSelectedDay(); }));
-  $("#btnOpenCalendar")?.addEventListener("click", openCalendarPicker);
   const dateStr = dateStrFor(selectedDayOffset);
   let html = "";
   MEAL_SLOTS.forEach(slot => {
@@ -458,7 +463,7 @@ function renderMenu() {
           const key = `${slot.id}-${idx}`;
           const state = dishAddSearch[key];
           if (!state || !state.open) {
-            return `<button class="mini-link dish-add-ing" data-act="toggle-add-ing" data-slot="${slot.id}" data-idx="${idx}">+ Añadir ingrediente</button>`;
+            return `<button class="add-ing-link" data-act="toggle-add-ing" data-slot="${slot.id}" data-idx="${idx}">+ Añadir ingrediente</button>`;
           }
           const candidates = products
             .filter(p => !(p.id in active) && p.name.toLowerCase().includes((state.filter||"").toLowerCase()))
@@ -491,7 +496,7 @@ function renderMenu() {
               <span>Planificar ${slot.label.toLowerCase()}</span>
             </button>
           ` : `
-            <button class="mini-link" data-act="edit-meal" data-slot="${slot.id}" style="margin-top:8px;">+ Añadir otro plato</button>
+            <button class="add-dish-link" data-act="edit-meal" data-slot="${slot.id}">+ Añadir otro plato</button>
           `}
           ${aggIng.length ? `<div class="meal-actions"><button class="btn btn-primary" data-act="cook-meal" data-slot="${slot.id}">🍳 Cocinar ${slot.label.toLowerCase()}</button></div>` : ""}
         </div>
@@ -712,7 +717,6 @@ function cookMeal(dateStr, slotId) {
             return { productId: pid, name: p ? p.name : "", amount: amt, unit: p ? unitOf(p).short : "" };
           });
           const dishNames = dishes.map(d => d.recipeName || d.freeText || "").filter(Boolean);
-          addHistoryEntry({ type: "cooked", slot: slotId, slotLabel, dishNames, items });
           saveCooked(dateStr, slotId, { items, dishNames });
           closeSheet();
         }
@@ -955,15 +959,17 @@ function openRecipeEditor(recipe, onSaved) {
   initial.filter(i => i.productId).forEach(i => { linkedAmounts[i.productId] = i.amount ?? ""; });
   const extras = initial.filter(i => !i.productId).map(i => i.name);
   let filterText = "";
+  let currentName = recipe?.name || "";
+  let currentUrl = recipe?.url || "";
 
   const render = () => {
     const html = `
       <div class="overlay" id="ov2">
         <div class="sheet">
           <h3>${editing ? "Editar receta" : "Nueva receta"}</h3>
-          <div class="field"><label>Nombre</label><input type="text" id="re-name" value="${escapeHtml(recipe?.name||"")}" placeholder="Ej. Salmón con verduras"></div>
+          <div class="field"><label>Nombre</label><input type="text" id="re-name" value="${escapeHtml(currentName)}" placeholder="Ej. Salmón con verduras"></div>
           <div class="field"><label>Enlace a la receta original (opcional)</label>
-            <input type="text" id="re-url" value="${escapeHtml(recipe?.url||"")}" placeholder="https://...">
+            <input type="text" id="re-url" value="${escapeHtml(currentUrl)}" placeholder="https://...">
           </div>
           <div class="field" style="margin-bottom:6px;"><label>Ingredientes de esta receta</label></div>
           <div id="selectedIngRows">
@@ -1023,6 +1029,8 @@ function openRecipeEditor(recipe, onSaved) {
     $("#modalRoot").innerHTML = html;
     $("#re-cancel").addEventListener("click", closeSheet);
     $("#ov2").addEventListener("click", e => { if (e.target.id === "ov2") closeSheet(); });
+    $("#re-name").addEventListener("input", e => { currentName = e.target.value; });
+    $("#re-url").addEventListener("input", e => { currentUrl = e.target.value; });
 
     $("#re-filter").addEventListener("input", e => { filterText = e.target.value; render(); });
     // Reponer el foco y el cursor en el buscador tras cada render (se pierde al regenerar el HTML)
@@ -1653,11 +1661,12 @@ async function exportTicket(entry) {
 // RENDER: HISTORIAL
 // ==================================================================
 function renderHistorial() {
-  if (history.length === 0) {
+  const visibleHistory = history.filter(h => h.type !== "cooked");
+  if (visibleHistory.length === 0) {
     $("#histList").innerHTML = emptyState("🕓", "Sin compras registradas", "Cuando confirmes una compra, quedará aquí.");
     return;
   }
-  $("#histList").innerHTML = history.map(h => {
+  $("#histList").innerHTML = visibleHistory.map(h => {
     const d = h.createdAt?.toDate ? h.createdAt.toDate() : new Date();
     const dateLabel = d.toLocaleDateString("es-ES", { day: "numeric", month: "long", year: "numeric" });
     const isTicket = h.type === "ticket";
@@ -1743,13 +1752,14 @@ $("#histList").addEventListener("click", e => {
 // BANNER DE RECORDATORIOS (descongelar)
 // ==================================================================
 $("#btnClearHistory").addEventListener("click", () => {
-  if (history.length === 0) return;
+  const visible = history.filter(h => h.type !== "cooked");
+  if (visible.length === 0) return;
   openConfirm(
     "Borrar historial",
-    `Se eliminarán las ${history.length} entrada(s) del historial (compras, tickets y cocinados). No se puede deshacer.`,
+    `Se eliminarán las ${visible.length} entrada(s) del historial (compras y tickets). No se puede deshacer.`,
     "Borrar todo",
     () => {
-      history.forEach(h => deleteHistoryEntry(h.id));
+      visible.forEach(h => deleteHistoryEntry(h.id));
       closeSheet();
     },
     true
