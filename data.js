@@ -68,6 +68,7 @@ export async function addProduct(p) {
     needsBuy: !!p.needsBuy,
     unit: p.unit || "ud",
     note: p.note || "",
+    customStep: p.customStep != null ? Number(p.customStep) : null,
     updatedAt: serverTimestamp()
   });
 }

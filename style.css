@@ -321,8 +321,14 @@ main {
 .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-bottom: 6px; }
 .cal-dow { text-align: center; font-size: 10.5px; color: var(--text-soft); font-weight: 600; padding-bottom: 4px; }
 .cal-day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
   text-align: center;
-  padding: 9px 0;
+  padding: 7px 0;
+  min-height: 20px;
   border-radius: var(--radius-s);
   font-size: 13px;
   cursor: pointer;
@@ -331,6 +337,8 @@ main {
 .cal-day:empty { background: none; cursor: default; }
 .cal-day.today { border: 1.5px solid var(--primary); font-weight: 700; }
 .cal-day.selected { background: var(--primary); color: white; font-weight: 700; }
+.cal-dots { display: flex; gap: 2px; height: 5px; }
+.cal-dot { width: 5px; height: 5px; border-radius: 50%; }
 .cal-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .cal-nav button { background: none; border: none; font-size: 20px; color: var(--primary); cursor: pointer; padding: 4px 10px; }
 .cal-nav .cal-title { font-family: "Fraunces", serif; font-size: 16px; font-weight: 600; text-transform: capitalize; }
@@ -439,12 +447,12 @@ main {
   color: var(--text-soft);
 }
 .dish-ing-input {
-  width: 40px;
+  width: 46px;
   flex-shrink: 0;
   padding: 4px 2px;
   border: 1px solid var(--danger);
   border-radius: var(--radius-s);
-  font-size: 12.5px;
+  font-size: 16px;
   text-align: center;
   color: var(--danger);
   font-weight: 700;
@@ -464,8 +472,19 @@ main {
 }
 .dish-ing-after.neg { color: var(--danger); }
 .meal-card:has(.cooked-title) { background: #F3F7F1; }
-.dish-row.cooked-title { border-bottom: 1px solid var(--border); padding-bottom: 8px; margin-bottom: 2px; }
-.dish-row.cooked-title .dish-name { color: var(--primary); }
+.dish-row.cooked-title { border-bottom: 1px solid var(--border); padding-bottom: 8px; margin-bottom: 2px; justify-content: space-between; }
+.dish-row.cooked-title .dish-name { color: var(--text); }
+.cooked-badge {
+  flex-shrink: 0;
+  background: var(--primary);
+  color: white;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  padding: 3px 9px;
+  border-radius: 999px;
+}
 .dish-ing-row.cooked .dish-ing-name { color: var(--text-soft); font-weight: 500; }
 .dish-ing-row.cooked .dish-ing-after { color: var(--text-soft); font-weight: 600; }
 .add-ing-link {
@@ -498,7 +517,7 @@ main {
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-s);
-  font-size: 13px;
+  font-size: 16px;
   margin-left: 14px;
   box-sizing: border-box;
 }
@@ -638,7 +657,7 @@ nav.tabbar .badge {
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-s);
-  font-size: 15px;
+  font-size: 16px;
   background: var(--bg);
   color: var(--text);
   font-family: inherit;
@@ -670,7 +689,7 @@ nav.tabbar .badge {
   padding: 6px 8px;
   border: 1px solid var(--border);
   border-radius: var(--radius-s);
-  font-size: 13px;
+  font-size: 16px;
   text-align: right;
 }
 .option-card {

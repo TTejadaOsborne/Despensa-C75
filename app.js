@@ -31,6 +31,8 @@ const $$ = sel => Array.from(document.querySelectorAll(sel));
 const escapeHtml = s => (s || "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
 const needsRestock = p => !!p.needsBuy;
 const unitOf = p => UNIT_MAP[p.unit] || UNIT_MAP.ud;
+const COUNT_UNITS = ["ud", "bolsa", "bote", "paquete"];
+const stepFor = p => (p.customStep != null ? p.customStep : unitOf(p).step);
 const fmtNum = n => { const r = Math.round((n + Number.EPSILON) * 100) / 100; return Number.isInteger(r) ? String(r) : String(r); };
 const fmtQty = p => { const u = unitOf(p); return `${fmtNum(p.stock)} ${u.short}`; };
 const DOW = ["Dom","Lun","Mar","Mié","Jue","Vie","Sáb"];
@@ -138,7 +140,12 @@ function openCalendarPicker() {
       const cls = ["cal-day"];
       if (cellDateStr === todayStr) cls.push("today");
       if (cellDateStr === selDateStr) cls.push("selected");
-      cells += `<div class="${cls.join(" ")}" data-date="${cellDateStr}">${d}</div>`;
+      const dots = MEAL_SLOTS.filter(slot => getDishes(cellDateStr, slot.id).length > 0)
+        .map(slot => `<span class="cal-dot" style="background:${slot.color}"></span>`).join("");
+      cells += `<div class="${cls.join(" ")}" data-date="${cellDateStr}">
+        <span class="cal-daynum">${d}</span>
+        <span class="cal-dots">${dots}</span>
+      </div>`;
     }
 
     const html = `
@@ -246,7 +253,7 @@ $("#invList").addEventListener("click", e => {
   if (btn) {
     const p = products.find(x => x.id === btn.dataset.id);
     if (!p) return;
-    const step = unitOf(p).step;
+    const step = stepFor(p);
     const raw = btn.dataset.act === "inc" ? p.stock + step : Math.max(0, p.stock - step);
     const next = Math.round((raw + Number.EPSILON) * 100) / 100;
     updateProduct(p.id, { stock: next });
@@ -290,6 +297,10 @@ function openProductSheet(product) {
           </div>
           <div class="field"><label>Stock actual</label><input type="number" id="f-stock" value="${p.stock}" min="0" step="any"></div>
         </div>
+        <div class="check-field" id="f-halfstep-wrap" style="display:${COUNT_UNITS.includes(p.unit||"ud")?"flex":"none"};">
+          <input type="checkbox" id="f-halfstep" ${p.customStep === 1 ? "" : "checked"}>
+          <label for="f-halfstep" style="margin:0;">Permitir medias unidades con los botones +/− (ej. 1/2 aguacate). Desmárcalo para algo que siempre es entero, como los huevos.</label>
+        </div>
         <div class="field"><label>Nota (opcional) — ej. "cada bolsa lleva 4 filetes"</label>
           <input type="text" id="f-note" value="${escapeHtml(p.note || "")}" placeholder="Contenido de cada unidad, si ayuda a recordarlo">
         </div>
@@ -302,6 +313,9 @@ function openProductSheet(product) {
       </div>
     </div>`;
   $("#modalRoot").innerHTML = html;
+  $("#f-unit").addEventListener("change", e => {
+    $("#f-halfstep-wrap").style.display = COUNT_UNITS.includes(e.target.value) ? "flex" : "none";
+  });
   $("#f-cancel").addEventListener("click", closeSheet);
   $("#ov").addEventListener("click", e => { if (e.target.id === "ov") closeSheet(); });
   if (editing) {
@@ -315,14 +329,16 @@ function openProductSheet(product) {
   $("#f-save").addEventListener("click", () => {
     const name = $("#f-name").value.trim();
     if (!name) { $("#f-name").focus(); return; }
+    const unitVal = $("#f-unit").value;
     const patch = {
       name,
       location: $("#f-location").value,
       zone: $("#f-zone").value,
-      unit: $("#f-unit").value,
+      unit: unitVal,
       stock: Number($("#f-stock").value) || 0,
       note: $("#f-note").value.trim(),
-      needsBuy: $("#f-needbuy").checked
+      needsBuy: $("#f-needbuy").checked,
+      customStep: COUNT_UNITS.includes(unitVal) && !$("#f-halfstep").checked ? 1 : null
     };
     if (editing) updateProduct(p.id, patch); else addProduct(patch);
     closeSheet();
@@ -416,7 +432,8 @@ function renderMenu() {
           <div class="slot-band" style="background:${slot.color};">${slot.label}</div>
           <div class="meal-card-body">
             <div class="dish-row cooked-title">
-              <span class="dish-name">✅ ${escapeHtml(dishNamesLabel || slot.label)}</span>
+              <span class="dish-name">${escapeHtml(dishNamesLabel || slot.label)}</span>
+              <span class="cooked-badge">Cocinado</span>
             </div>
             ${rows}
             <div class="meal-actions">
@@ -493,7 +510,7 @@ function renderMenu() {
           ${dishes.length === 0 ? `
             <button class="add-meal-btn" data-act="edit-meal" data-slot="${slot.id}">
               <span class="add-meal-plus">+</span>
-              <span>Planificar ${slot.label.toLowerCase()}</span>
+              <span>Añadir plato</span>
             </button>
           ` : `
             <button class="add-dish-link" data-act="edit-meal" data-slot="${slot.id}">+ Añadir otro plato</button>
