@@ -285,12 +285,18 @@ main {
 .day-tabs-row .day-tabs { margin-bottom: 0; flex: 1; }
 .cal-btn {
   flex-shrink: 0;
-  width: 40px; height: 40px;
+  width: 28px; height: 28px;
   border-radius: 50%;
   border: 1px solid var(--border);
   background: var(--surface);
-  font-size: 17px;
+  font-size: 12px;
+  line-height: 1;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
+  opacity: 0.75;
 }
 .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-bottom: 6px; }
 .cal-dow { text-align: center; font-size: 10.5px; color: var(--text-soft); font-weight: 600; padding-bottom: 4px; }
@@ -315,7 +321,9 @@ main {
   padding-bottom: 4px;
   margin-bottom: 14px;
   -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
 }
+.day-tabs::-webkit-scrollbar { display: none; }
 .day-tab {
   flex-shrink: 0;
   padding: 8px 14px;
@@ -435,6 +443,11 @@ main {
   white-space: nowrap;
 }
 .dish-ing-after.neg { color: var(--danger); }
+.meal-card:has(.cooked-title) { background: #F3F7F1; }
+.dish-row.cooked-title { border-bottom: 1px solid var(--border); padding-bottom: 8px; margin-bottom: 2px; }
+.dish-row.cooked-title .dish-name { color: var(--primary); }
+.dish-ing-row.cooked .dish-ing-name { color: var(--text-soft); font-weight: 500; }
+.dish-ing-row.cooked .dish-ing-after { color: var(--text-soft); font-weight: 600; }
 .dish-add-search {
   width: calc(100% - 14px);
   padding: 8px 10px;

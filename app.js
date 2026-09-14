@@ -349,15 +349,26 @@ function emptyState(glyph, title, text) {
 // ==================================================================
 // RENDER: MENÚ SEMANAL
 // ==================================================================
-function getDishes(dateStr, slotId) {
+function getSlotData(dateStr, slotId) {
   const raw = (menuByDate[dateStr] || {})[slotId];
-  if (!raw) return [];
-  if (Array.isArray(raw)) return raw;
-  return [raw]; // formato antiguo (un solo plato) — se sigue mostrando igual
+  if (!raw) return { dishes: [], cooked: null };
+  if (Array.isArray(raw)) return { dishes: raw, cooked: null }; // formato anterior (array suelto)
+  if (raw.dishes) return { dishes: raw.dishes, cooked: raw.cooked || null }; // formato actual
+  return { dishes: [raw], cooked: null }; // formato más antiguo (un solo plato)
+}
+
+function getDishes(dateStr, slotId) {
+  return getSlotData(dateStr, slotId).dishes;
 }
 
 function saveDishes(dateStr, slotId, dishes) {
-  return setMealSlot(dateStr, slotId, dishes);
+  const { cooked } = getSlotData(dateStr, slotId);
+  return setMealSlot(dateStr, slotId, { dishes, cooked });
+}
+
+function saveCooked(dateStr, slotId, cooked) {
+  const { dishes } = getSlotData(dateStr, slotId);
+  return setMealSlot(dateStr, slotId, { dishes, cooked });
 }
 
 function removeDish(dateStr, slotId, idx) {
@@ -381,7 +392,37 @@ function renderMenu() {
   const dateStr = dateStrFor(selectedDayOffset);
   let html = "";
   MEAL_SLOTS.forEach(slot => {
-    const dishes = getDishes(dateStr, slot.id);
+    const { dishes, cooked } = getSlotData(dateStr, slot.id);
+
+    if (cooked) {
+      // ---- Franja ya confirmada: resumen fijo, sin edición directa ----
+      const dishNamesLabel = (cooked.dishNames && cooked.dishNames.length ? cooked.dishNames : dishes.map(d => d.recipeName || d.freeText || "").filter(Boolean)).join(", ");
+      const rows = (cooked.items || []).map(it => {
+        const p = products.find(x => x.id === it.productId);
+        const nowStock = p ? fmtNum(p.stock) : "?";
+        return `
+          <div class="dish-ing-row cooked">
+            <span class="dish-ing-name">${escapeHtml(it.name)}<span class="dish-ing-have">usaste ${fmtNum(it.amount)} ${escapeHtml(it.unit||"")}</span></span>
+            <span class="dish-ing-after">ahora ${nowStock} ${escapeHtml(it.unit||"")}</span>
+          </div>`;
+      }).join("");
+      html += `
+        <div class="meal-card" data-slot="${slot.id}">
+          <div class="slot-band" style="background:${slot.color};">${slot.label}</div>
+          <div class="meal-card-body">
+            <div class="dish-row cooked-title">
+              <span class="dish-name">✅ ${escapeHtml(dishNamesLabel || slot.label)}</span>
+            </div>
+            ${rows}
+            <div class="meal-actions">
+              <button class="mini-link" data-act="modify-cooked" data-slot="${slot.id}">✏️ Modificar</button>
+            </div>
+          </div>
+        </div>`;
+      return;
+    }
+
+    // ---- Franja pendiente: edición normal ----
     const aggByProduct = {}; // para el botón "Cocinar" de toda la franja
 
     const dishBlocks = dishes.map((d, idx) => {
@@ -462,6 +503,7 @@ function renderMenu() {
     const idx = b.dataset.idx !== undefined ? Number(b.dataset.idx) : null;
     openMealSheet(dateStr, b.dataset.slot, idx);
   }));
+  $$('[data-act="modify-cooked"]').forEach(b => b.addEventListener("click", () => modifyCooked(dateStr, b.dataset.slot)));
   $$('[data-dish-ing-amount]').forEach(inp => {
     inp.addEventListener("click", e => e.stopPropagation());
     inp.addEventListener("focus", () => inp.select());
@@ -669,13 +711,9 @@ function cookMeal(dateStr, slotId) {
             const p = products.find(x => x.id === pid);
             return { productId: pid, name: p ? p.name : "", amount: amt, unit: p ? unitOf(p).short : "" };
           });
-          addHistoryEntry({
-            type: "cooked",
-            slot: slotId,
-            slotLabel,
-            dishNames: dishes.map(d => d.recipeName || d.freeText || "").filter(Boolean),
-            items
-          });
+          const dishNames = dishes.map(d => d.recipeName || d.freeText || "").filter(Boolean);
+          addHistoryEntry({ type: "cooked", slot: slotId, slotLabel, dishNames, items });
+          saveCooked(dateStr, slotId, { items, dishNames });
           closeSheet();
         }
       );
@@ -683,6 +721,63 @@ function cookMeal(dateStr, slotId) {
   });
 }
 
+function modifyCooked(dateStr, slotId) {
+  const { cooked } = getSlotData(dateStr, slotId);
+  if (!cooked) return;
+  const dishes = getDishes(dateStr, slotId);
+  const pool = {};
+  dishes.forEach(d => {
+    if (!d.recipeId) return;
+    const r = recipes.find(x => x.id === d.recipeId);
+    if (!r) return;
+    (r.ingredients || []).forEach(ing => {
+      if (!ing.productId || ing.amount == null) return;
+      pool[ing.productId] = (pool[ing.productId] || 0) + ing.amount;
+    });
+  });
+  const initialSelected = {};
+  (cooked.items || []).forEach(it => { initialSelected[it.productId] = it.amount; });
+
+  const slotLabel = MEAL_SLOTS.find(s => s.id === slotId)?.label || "";
+  openIngredientPickerSheet({
+    title: "Modificar " + slotLabel.toLowerCase(),
+    hint: "Ajusta lo que realmente se usó. Solo se corrige la diferencia en tu inventario, no se vuelve a restar todo.",
+    pool,
+    initialSelected,
+    confirmLabel: "Guardar cambios",
+    onConfirm: (entries) => {
+      openConfirm(
+        "Guardar cambios",
+        "Se ajustará tu inventario según la diferencia con lo anterior.",
+        "Guardar",
+        () => {
+          const oldMap = {};
+          (cooked.items || []).forEach(it => { oldMap[it.productId] = it.amount; });
+          const newMap = Object.fromEntries(entries);
+          const allIds = new Set([...Object.keys(oldMap), ...Object.keys(newMap)]);
+          allIds.forEach(pid => {
+            const delta = (newMap[pid] || 0) - (oldMap[pid] || 0);
+            if (!delta) return;
+            const p = products.find(x => x.id === pid);
+            if (!p) return;
+            const next = Math.round((p.stock - delta + Number.EPSILON) * 100) / 100;
+            updateProduct(p.id, { stock: next });
+          });
+          const items = entries.map(([pid, amt]) => {
+            const p = products.find(x => x.id === pid);
+            return { productId: pid, name: p ? p.name : "", amount: amt, unit: p ? unitOf(p).short : "" };
+          });
+          if (items.length === 0) {
+            saveCooked(dateStr, slotId, null); // ya no queda nada usado: vuelve a pendiente
+          } else {
+            saveCooked(dateStr, slotId, { items, dishNames: cooked.dishNames });
+          }
+          closeSheet();
+        }
+      );
+    }
+  });
+}
 
 function openMealSheet(dateStr, slotId, dishIndex) {
   const slotLabel = MEAL_SLOTS.find(s=>s.id===slotId).label;
