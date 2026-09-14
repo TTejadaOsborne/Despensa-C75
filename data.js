@@ -68,8 +68,6 @@ export async function addProduct(p) {
     needsBuy: !!p.needsBuy,
     unit: p.unit || "ud",
     note: p.note || "",
-    needsDefrost: !!p.needsDefrost,
-    defrostHours: Number(p.defrostHours) || 24,
     updatedAt: serverTimestamp()
   });
 }
@@ -144,8 +142,12 @@ export function listenHistory(cb) {
 }
 
 export async function addHistoryEntry(entry) {
-  // entry: { items: [...], type: 'purchase' | 'ticket', photo?: base64 string }
+  // entry: { items: [...], type: 'purchase' | 'ticket' | 'cooked', photo?: base64 string }
   return addDoc(historyCol, { ...entry, createdAt: serverTimestamp() });
+}
+
+export async function deleteHistoryEntry(id) {
+  return deleteDoc(doc(db, "history", id));
 }
 
 // --- Ideas de inspiración (enlaces externos: web, Instagram, TikTok, YouTube...) ---

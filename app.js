@@ -3,7 +3,7 @@ import {
   listenProducts, addProduct, updateProduct, deleteProduct,
   listenRecipes, addRecipe, updateRecipe, deleteRecipe,
   listenMenu, setMealSlot,
-  listenHistory, addHistoryEntry,
+  listenHistory, addHistoryEntry, deleteHistoryEntry,
   listenInspirations, addInspiration, deleteInspiration
 } from "./data.js";
 import {
@@ -23,6 +23,7 @@ let shoppingChecked = {}; // { productId: true }
 let selectedDayOffset = 0;
 let selectedLocation = "Todas";
 let dishAddSearch = {}; // "slot-idx" -> { open, filter }
+let menuScrolledToToday = false;
 let syncFlags = { products: false, recipes: false, menu: false, history: false, shopping: false, inspirations: false };
 
 const $ = sel => document.querySelector(sel);
@@ -67,11 +68,25 @@ function updateSyncStatus() {
 $$(".tab-btn").forEach(btn => {
   btn.addEventListener("click", () => switchView(btn.dataset.view));
 });
+function scrollToSelectedDay() {
+  setTimeout(() => {
+    const container = $("#dayTabs");
+    const activeTab = $(`.day-tab[data-offset="${selectedDayOffset}"]`);
+    if (container && activeTab) {
+      container.scrollLeft = activeTab.offsetLeft - (container.clientWidth / 2) + (activeTab.clientWidth / 2);
+    }
+  }, 0);
+}
+
 function switchView(name) {
   $$(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.view === name));
   $$(".view").forEach(v => v.classList.toggle("active", v.id === "view-" + name));
   $("#fabAdd").style.display = name === "inventario" ? "flex" : "none";
   $("#fabNewRecipe").style.display = name === "menu" ? "flex" : "none";
+  if (name === "menu" && !menuScrolledToToday) {
+    menuScrolledToToday = true;
+    scrollToSelectedDay();
+  }
 }
 
 // ---------- Fechas ----------
@@ -85,7 +100,73 @@ function labelFor(offset) {
   d.setDate(d.getDate() + offset);
   if (offset === 0) return { dname: "Hoy", dnum: `${d.getDate()}` };
   if (offset === 1) return { dname: "Mañana", dnum: `${d.getDate()}` };
+  if (offset === -1) return { dname: "Ayer", dnum: `${d.getDate()}` };
   return { dname: DOW[d.getDay()], dnum: `${d.getDate()}` };
+}
+
+function offsetForDate(targetDate) {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const t = new Date(targetDate); t.setHours(0, 0, 0, 0);
+  return Math.round((t - today) / 86400000);
+}
+
+const MONTH_NAMES = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"];
+
+function openCalendarPicker() {
+  const base = new Date();
+  base.setDate(base.getDate() + selectedDayOffset);
+  let viewYear = base.getFullYear();
+  let viewMonth = base.getMonth();
+
+  const render = () => {
+    const first = new Date(viewYear, viewMonth, 1);
+    const startWeekday = (first.getDay() + 6) % 7; // lunes = 0
+    const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+    const todayStr = dateStrFor(0);
+    const selDateStr = dateStrFor(selectedDayOffset);
+
+    let cells = "";
+    for (let i = 0; i < startWeekday; i++) cells += `<div class="cal-day"></div>`;
+    for (let d = 1; d <= daysInMonth; d++) {
+      const cellDate = new Date(viewYear, viewMonth, d);
+      const cellDateStr = `${viewYear}-${String(viewMonth+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+      const cls = ["cal-day"];
+      if (cellDateStr === todayStr) cls.push("today");
+      if (cellDateStr === selDateStr) cls.push("selected");
+      cells += `<div class="${cls.join(" ")}" data-date="${cellDateStr}">${d}</div>`;
+    }
+
+    const html = `
+      <div class="overlay" id="ovCal">
+        <div class="sheet">
+          <h3>Ir a una fecha</h3>
+          <div class="cal-nav">
+            <button id="cal-prev">‹</button>
+            <span class="cal-title">${MONTH_NAMES[viewMonth]} ${viewYear}</span>
+            <button id="cal-next">›</button>
+          </div>
+          <div class="cal-grid">
+            ${["L","M","X","J","V","S","D"].map(d => `<div class="cal-dow">${d}</div>`).join("")}
+            ${cells}
+          </div>
+          <div class="sheet-actions" style="margin-top:10px;">
+            <button class="btn btn-secondary btn-block" id="cal-cancel">Cerrar</button>
+          </div>
+        </div>
+      </div>`;
+    $("#modalRoot").innerHTML = html;
+    $("#cal-cancel").addEventListener("click", closeSheet);
+    $("#ovCal").addEventListener("click", e => { if (e.target.id === "ovCal") closeSheet(); });
+    $("#cal-prev").addEventListener("click", () => { viewMonth--; if (viewMonth < 0) { viewMonth = 11; viewYear--; } render(); });
+    $("#cal-next").addEventListener("click", () => { viewMonth++; if (viewMonth > 11) { viewMonth = 0; viewYear++; } render(); });
+    $$('.cal-day[data-date]').forEach(cell => cell.addEventListener("click", () => {
+      selectedDayOffset = offsetForDate(cell.dataset.date);
+      closeSheet();
+      renderMenu();
+      scrollToSelectedDay();
+    }));
+  };
+  render();
 }
 
 // ==================================================================
@@ -134,7 +215,6 @@ function renderInventario() {
             <div class="product-name">${escapeHtml(p.name)}</div>
             <div class="product-meta">
               <span class="chip">${escapeHtml(p.zone)}</span>
-              ${p.needsDefrost ? `<span class="chip frost">❄️ ${p.defrostHours}h antes</span>` : ""}
             </div>
             ${p.note ? `<div style="font-size:10.5px;color:var(--text-soft);font-style:italic;margin-top:2px;">${escapeHtml(p.note)}</div>` : ""}
           </div>
@@ -184,7 +264,7 @@ $("#fabNewRecipe").addEventListener("click", () => openRecipeEditor(null));
 
 function openProductSheet(product) {
   const editing = !!product;
-  const p = product || { name: "", zone: ZONES[0], location: "Despensa", stock: 1, unit: "ud", note: "", needsDefrost: false, defrostHours: 24, needsBuy: false };
+  const p = product || { name: "", zone: ZONES[0], location: "Despensa", stock: 1, unit: "ud", note: "", needsBuy: false };
   const html = `
     <div class="overlay" id="ov">
       <div class="sheet">
@@ -208,10 +288,6 @@ function openProductSheet(product) {
           <input type="text" id="f-note" value="${escapeHtml(p.note || "")}" placeholder="Contenido de cada unidad, si ayuda a recordarlo">
         </div>
         <div class="check-field"><input type="checkbox" id="f-needbuy" ${p.needsBuy ? "checked" : ""}><label for="f-needbuy" style="margin:0;">Necesario para la compra</label></div>
-        <div class="check-field"><input type="checkbox" id="f-frost" ${p.needsDefrost?"checked":""}><label for="f-frost" style="margin:0;">Hay que sacarlo del congelador con antelación</label></div>
-        <div class="field" id="f-frost-hours-wrap" style="display:${p.needsDefrost?"block":"none"};">
-          <label>Horas de antelación</label><input type="number" id="f-frost-hours" value="${p.defrostHours}" min="1">
-        </div>
         <div class="sheet-actions">
           ${editing ? `<button class="btn btn-danger" id="f-delete">Eliminar</button>` : ""}
           <button class="btn btn-secondary" id="f-cancel">Cancelar</button>
@@ -220,9 +296,6 @@ function openProductSheet(product) {
       </div>
     </div>`;
   $("#modalRoot").innerHTML = html;
-  $("#f-frost").addEventListener("change", e => {
-    $("#f-frost-hours-wrap").style.display = e.target.checked ? "block" : "none";
-  });
   $("#f-cancel").addEventListener("click", closeSheet);
   $("#ov").addEventListener("click", e => { if (e.target.id === "ov") closeSheet(); });
   if (editing) {
@@ -243,9 +316,7 @@ function openProductSheet(product) {
       unit: $("#f-unit").value,
       stock: Number($("#f-stock").value) || 0,
       note: $("#f-note").value.trim(),
-      needsBuy: $("#f-needbuy").checked,
-      needsDefrost: $("#f-frost").checked,
-      defrostHours: Number($("#f-frost-hours").value) || 24
+      needsBuy: $("#f-needbuy").checked
     };
     if (editing) updateProduct(p.id, patch); else addProduct(patch);
     closeSheet();
@@ -296,20 +367,21 @@ function removeDish(dateStr, slotId, idx) {
 
 function renderMenu() {
   let tabs = "";
-  for (let i = 0; i < 7; i++) {
+  const rangeStart = Math.min(-60, selectedDayOffset - 5);
+  const rangeEnd = Math.max(14, selectedDayOffset + 5);
+  for (let i = rangeStart; i <= rangeEnd; i++) {
     const l = labelFor(i);
     tabs += `<button class="day-tab ${i===selectedDayOffset?"active":""}" data-offset="${i}">
       <span class="dname">${l.dname}</span><span class="dnum">${l.dnum}</span>
     </button>`;
   }
   $("#dayTabs").innerHTML = tabs;
-  $$(".day-tab").forEach(b => b.addEventListener("click", () => { selectedDayOffset = Number(b.dataset.offset); renderMenu(); }));
-
+  $$(".day-tab").forEach(b => b.addEventListener("click", () => { selectedDayOffset = Number(b.dataset.offset); renderMenu(); scrollToSelectedDay(); }));
+  $("#btnOpenCalendar")?.addEventListener("click", openCalendarPicker);
   const dateStr = dateStrFor(selectedDayOffset);
   let html = "";
   MEAL_SLOTS.forEach(slot => {
     const dishes = getDishes(dateStr, slot.id);
-    const frostNames = new Set();
     const aggByProduct = {}; // para el botón "Cocinar" de toda la franja
 
     const dishBlocks = dishes.map((d, idx) => {
@@ -319,12 +391,6 @@ function renderMenu() {
       const active = d.customIngredients || pool; // lo que se muestra y se puede editar en línea
 
       Object.entries(active).forEach(([pid, amt]) => { aggByProduct[pid] = (aggByProduct[pid] || 0) + amt; });
-      if (recipe) {
-        Object.keys(active).forEach(pid => {
-          const p = products.find(x => x.id === pid);
-          if (p && p.needsDefrost && p.location === "Congelador") frostNames.add(p.name);
-        });
-      }
 
       const rows = Object.entries(active).map(([pid, amt]) => {
         const p = products.find(x => x.id === pid);
@@ -378,7 +444,6 @@ function renderMenu() {
         <div class="slot-band" style="background:${slot.color};">${slot.label}</div>
         <div class="meal-card-body">
           ${dishBlocks}
-          ${frostNames.size ? `<div class="frost-note">❄️ Sacar del congelador: ${[...frostNames].map(escapeHtml).join(", ")}</div>` : ""}
           ${dishes.length === 0 ? `
             <button class="add-meal-btn" data-act="edit-meal" data-slot="${slot.id}">
               <span class="add-meal-plus">+</span>
@@ -618,16 +683,6 @@ function cookMeal(dateStr, slotId) {
   });
 }
 
-function frostWarningsFor(recipeId) {
-  const r = recipes.find(x => x.id === recipeId);
-  if (!r) return [];
-  const names = [];
-  (r.ingredients || []).forEach(ing => {
-    const p = products.find(x => x.id === ing.productId);
-    if (p && p.needsDefrost && p.location === "Congelador") names.push(p.name);
-  });
-  return names;
-}
 
 function openMealSheet(dateStr, slotId, dishIndex) {
   const slotLabel = MEAL_SLOTS.find(s=>s.id===slotId).label;
@@ -1534,6 +1589,7 @@ function renderHistorial() {
             <span class="hist-count">${countLabel}</span>
             ${isTicket ? `<button class="mini-link" data-act="export-ticket" data-id="${h.id}">Guardar</button>` : ""}
             ${isCooked ? `<button class="mini-link" data-act="repeat-cooked" data-id="${h.id}">🔁 Repetir hoy</button>` : ""}
+            <button class="dish-remove" data-act="delete-entry" data-id="${h.id}" title="Eliminar esta entrada">×</button>
           </span>
         </div>
         <div class="hist-body">
@@ -1544,6 +1600,17 @@ function renderHistorial() {
   }).join("");
 }
 $("#histList").addEventListener("click", e => {
+  const deleteBtn = e.target.closest('[data-act="delete-entry"]');
+  if (deleteBtn) {
+    e.stopPropagation();
+    const entry = history.find(h => h.id === deleteBtn.dataset.id);
+    if (!entry) return;
+    openConfirm("Eliminar entrada", "¿Eliminar esta entrada del historial? No se puede deshacer.", "Eliminar", () => {
+      deleteHistoryEntry(entry.id);
+      closeSheet();
+    }, true);
+    return;
+  }
   const repeatBtn = e.target.closest('[data-act="repeat-cooked"]');
   if (repeatBtn) {
     e.stopPropagation();
@@ -1580,46 +1647,19 @@ $("#histList").addEventListener("click", e => {
 // ==================================================================
 // BANNER DE RECORDATORIOS (descongelar)
 // ==================================================================
-function computeFrostReminders() {
-  const items = [];
-  [0, 1].forEach(offset => {
-    const dateStr = dateStrFor(offset);
-    const dayData = menuByDate[dateStr] || {};
-    MEAL_SLOTS.forEach(slot => {
-      const meal = dayData[slot.id];
-      if (!meal || !meal.recipeId) return;
-      const names = frostWarningsFor(meal.recipeId);
-      names.forEach(name => {
-        items.push({ name, when: offset === 0 ? "hoy" : "mañana", meal: slot.label.toLowerCase() });
-      });
-    });
-  });
-  return items;
-}
-
-function renderBanner() {
-  const items = computeFrostReminders();
-  const todayKey = dateStrFor(0);
-  const dismissKey = "despensa_banner_dismissed_" + todayKey;
-  if (items.length === 0 || localStorage.getItem(dismissKey)) {
-    $("#bannerZone").innerHTML = "";
-    return;
-  }
-  const list = items.map(i => `${escapeHtml(i.name)} (para la ${i.meal} de ${i.when})`).join(", ");
-  $("#bannerZone").innerHTML = `
-    <div class="banner">
-      <span class="icon">❄️</span>
-      <div>
-        <strong>Saca esto del congelador</strong>
-        ${list}
-      </div>
-      <button class="dismiss" id="bannerDismiss">×</button>
-    </div>`;
-  $("#bannerDismiss").addEventListener("click", () => {
-    localStorage.setItem(dismissKey, "1");
-    $("#bannerZone").innerHTML = "";
-  });
-}
+$("#btnClearHistory").addEventListener("click", () => {
+  if (history.length === 0) return;
+  openConfirm(
+    "Borrar historial",
+    `Se eliminarán las ${history.length} entrada(s) del historial (compras, tickets y cocinados). No se puede deshacer.`,
+    "Borrar todo",
+    () => {
+      history.forEach(h => deleteHistoryEntry(h.id));
+      closeSheet();
+    },
+    true
+  );
+});
 
 // ==================================================================
 // RENDER GLOBAL
@@ -1630,6 +1670,5 @@ function renderAll() {
   renderMenu();
   renderCompra();
   renderHistorial();
-  renderBanner();
 }
 renderAll();

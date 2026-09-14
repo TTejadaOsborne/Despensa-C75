@@ -25,8 +25,6 @@
     </div>
   </header>
 
-  <div id="bannerZone"></div>
-
   <main>
 
     <!-- INVENTARIO -->
@@ -37,7 +35,10 @@
 
     <!-- MENÚ -->
     <section class="view" id="view-menu">
-      <div class="day-tabs" id="dayTabs"></div>
+      <div class="day-tabs-row">
+        <div class="day-tabs" id="dayTabs"></div>
+        <button class="cal-btn" id="btnOpenCalendar" title="Ir a una fecha">📅</button>
+      </div>
       <div id="menuBody"></div>
     </section>
 
@@ -54,7 +55,7 @@
 
     <!-- HISTORIAL -->
     <section class="view" id="view-historial">
-      <div class="section-head"><h2>Historial de compras</h2></div>
+      <div class="section-head"><h2>Historial de compras</h2><button class="mini-link" id="btnClearHistory" style="color:var(--danger);">🗑️ Borrar historial</button></div>
       <div id="histList"></div>
     </section>
 

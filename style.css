@@ -281,6 +281,33 @@ main {
 .checkbox.on { background: var(--primary); border-color: var(--primary); color: white; }
 
 /* Menu week */
+.day-tabs-row { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+.day-tabs-row .day-tabs { margin-bottom: 0; flex: 1; }
+.cal-btn {
+  flex-shrink: 0;
+  width: 40px; height: 40px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 17px;
+  cursor: pointer;
+}
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-bottom: 6px; }
+.cal-dow { text-align: center; font-size: 10.5px; color: var(--text-soft); font-weight: 600; padding-bottom: 4px; }
+.cal-day {
+  text-align: center;
+  padding: 9px 0;
+  border-radius: var(--radius-s);
+  font-size: 13px;
+  cursor: pointer;
+  background: var(--bg);
+}
+.cal-day:empty { background: none; cursor: default; }
+.cal-day.today { border: 1.5px solid var(--primary); font-weight: 700; }
+.cal-day.selected { background: var(--primary); color: white; font-weight: 700; }
+.cal-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.cal-nav button { background: none; border: none; font-size: 20px; color: var(--primary); cursor: pointer; padding: 4px 10px; }
+.cal-nav .cal-title { font-family: "Fraunces", serif; font-size: 16px; font-weight: 600; text-transform: capitalize; }
 .day-tabs {
   display: flex;
   gap: 6px;
