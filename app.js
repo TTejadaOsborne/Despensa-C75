@@ -1014,7 +1014,7 @@ function openRecipeEditor(recipe, onSaved) {
                   </div>
                   <div class="unmeasured-toggle">
                     <input type="checkbox" id="um-${pid}" data-toggle-unmeasured="${pid}" ${isUnmeasured ? "checked" : ""}>
-                    <label for="um-${pid}">No medir (va en la receta pero no resta del inventario)</label>
+                    <label for="um-${pid}">⚖️ No medir — entra en la receta pero no resta del inventario</label>
                   </div>`;
               }).join("");
             })()}
