@@ -451,6 +451,7 @@ function renderMenu() {
       const name = d.recipeName || d.freeText || "";
       const recipe = d.recipeId ? recipes.find(r => r.id === d.recipeId) : null;
       const pool = recipe ? Object.fromEntries((recipe.ingredients || []).filter(i => i.productId && i.amount != null).map(i => [i.productId, i.amount])) : {};
+      const unmeasuredNames = recipe ? (recipe.ingredients || []).filter(i => i.unmeasured).map(i => i.name).filter(Boolean) : [];
       const active = d.customIngredients || pool; // lo que se muestra y se puede editar en línea
 
       Object.entries(active).forEach(([pid, amt]) => { aggByProduct[pid] = (aggByProduct[pid] || 0) + amt; });
@@ -476,6 +477,7 @@ function renderMenu() {
           <button class="dish-remove" data-act="remove-dish" data-slot="${slot.id}" data-idx="${idx}" title="Quitar este plato">×</button>
         </div>
         ${rows}
+        ${unmeasuredNames.length ? `<div class="unmeasured-note">También lleva: ${unmeasuredNames.map(escapeHtml).join(", ")} (no medido)</div>` : ""}
         ${recipe ? (() => {
           const key = `${slot.id}-${idx}`;
           const state = dishAddSearch[key];
@@ -973,7 +975,11 @@ function openRecipeEditor(recipe, onSaved) {
   const editing = !!(recipe && recipe.id);
   const initial = recipe ? [...(recipe.ingredients||[])] : [];
   const linkedAmounts = {}; // productId -> amount
-  initial.filter(i => i.productId).forEach(i => { linkedAmounts[i.productId] = i.amount ?? ""; });
+  const unmeasured = {}; // productId -> true si es "no medir" (no resta del inventario)
+  initial.filter(i => i.productId).forEach(i => {
+    linkedAmounts[i.productId] = i.amount ?? "";
+    if (i.unmeasured) unmeasured[i.productId] = true;
+  });
   const extras = initial.filter(i => !i.productId).map(i => i.name);
   let filterText = "";
   let currentName = recipe?.name || "";
@@ -990,26 +996,35 @@ function openRecipeEditor(recipe, onSaved) {
           </div>
           <div class="field" style="margin-bottom:6px;"><label>Ingredientes de esta receta</label></div>
           <div id="selectedIngRows">
-            ${Object.entries(linkedAmounts).filter(([, amt]) => amt !== "").length === 0
-              ? `<div style="font-size:12.5px;color:var(--text-soft);margin-bottom:10px;">Aún no has añadido ninguno — búscalo debajo.</div>`
-              : Object.entries(linkedAmounts).filter(([, amt]) => amt !== "").map(([pid, amt]) => {
-                  const p = products.find(x => x.id === pid);
-                  if (!p) return "";
-                  return `
-                    <div class="pick-row">
-                      <div class="pick-name">${escapeHtml(p.name)}<span class="ing-unit" style="flex:0;white-space:nowrap;">tienes ${fmtNum(p.stock)} ${unitOf(p).short}</span></div>
-                      <input type="number" step="any" min="0" data-pid-amount="${p.id}" value="${amt}">
-                      <span class="ing-unit">${unitOf(p).short}</span>
-                      <button class="dish-remove" data-remove-linked="${p.id}" title="Quitar">×</button>
-                    </div>`;
-                }).join("")}
+            ${(() => {
+              const selectedPids = Object.keys(linkedAmounts).filter(pid => linkedAmounts[pid] !== "" || unmeasured[pid]);
+              if (selectedPids.length === 0) return `<div style="font-size:12.5px;color:var(--text-soft);margin-bottom:10px;">Aún no has añadido ninguno — búscalo debajo.</div>`;
+              return selectedPids.map(pid => {
+                const p = products.find(x => x.id === pid);
+                if (!p) return "";
+                const isUnmeasured = !!unmeasured[pid];
+                return `
+                  <div class="pick-row">
+                    <div class="pick-name">${escapeHtml(p.name)}<span class="ing-unit" style="flex:0;white-space:nowrap;">tienes ${fmtNum(p.stock)} ${unitOf(p).short}</span></div>
+                    ${isUnmeasured
+                      ? `<span class="unmeasured-tag">no se mide</span>`
+                      : `<input type="number" step="any" min="0" data-pid-amount="${p.id}" value="${linkedAmounts[pid]}">
+                         <span class="ing-unit">${unitOf(p).short}</span>`}
+                    <button class="dish-remove" data-remove-linked="${p.id}" title="Quitar">×</button>
+                  </div>
+                  <div class="unmeasured-toggle">
+                    <input type="checkbox" id="um-${pid}" data-toggle-unmeasured="${pid}" ${isUnmeasured ? "checked" : ""}>
+                    <label for="um-${pid}">No medir (va en la receta pero no resta del inventario)</label>
+                  </div>`;
+              }).join("");
+            })()}
           </div>
           <div class="field"><label>Buscar y añadir ingrediente de tu despensa</label>
             <input type="text" id="re-filter" placeholder="Buscar producto…" value="${escapeHtml(filterText)}">
           </div>
           <div id="ingPicker" style="max-height:280px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-s);margin-bottom:14px;">
             ${(() => {
-              const candidates = products.filter(p => !(p.id in linkedAmounts && linkedAmounts[p.id] !== "") && p.name.toLowerCase().includes(filterText.toLowerCase()));
+              const candidates = products.filter(p => !((p.id in linkedAmounts && linkedAmounts[p.id] !== "") || unmeasured[p.id]) && p.name.toLowerCase().includes(filterText.toLowerCase()));
               if (candidates.length === 0) return `<div style="padding:14px;font-size:13px;color:var(--text-soft);">Sin productos que coincidan.</div>`;
               const byLoc = {};
               candidates.forEach(p => { (byLoc[p.location] ||= []).push(p); });
@@ -1064,8 +1079,15 @@ function openRecipeEditor(recipe, onSaved) {
       });
       inp.addEventListener("focus", () => inp.select());
     });
+    $$('[data-toggle-unmeasured]').forEach(box => box.addEventListener("change", () => {
+      const pid = box.dataset.toggleUnmeasured;
+      if (box.checked) { unmeasured[pid] = true; if (!linkedAmounts[pid]) linkedAmounts[pid] = ""; }
+      else { delete unmeasured[pid]; }
+      render();
+    }));
     $$('[data-remove-linked]').forEach(btn => btn.addEventListener("click", () => {
       delete linkedAmounts[btn.dataset.removeLinked];
+      delete unmeasured[btn.dataset.removeLinked];
       render();
     }));
     $$('[data-add-linked]').forEach(row => row.addEventListener("click", () => {
@@ -1092,13 +1114,17 @@ function openRecipeEditor(recipe, onSaved) {
       const name = $("#re-name").value.trim();
       if (!name) { $("#re-name").focus(); return; }
       const linked = Object.entries(linkedAmounts)
-        .filter(([, amt]) => amt !== "" && amt != null && Number(amt) > 0)
+        .filter(([pid, amt]) => !unmeasured[pid] && amt !== "" && amt != null && Number(amt) > 0)
         .map(([pid, amt]) => {
           const p = products.find(x => x.id === pid);
           return { productId: pid, name: p ? p.name : "", amount: Number(amt) };
         });
+      const unmeasuredIng = Object.keys(unmeasured).map(pid => {
+        const p = products.find(x => x.id === pid);
+        return { productId: pid, name: p ? p.name : "", amount: null, unmeasured: true };
+      });
       const extraIng = extras.filter(n => n && n.trim()).map(n => ({ productId: "", name: n.trim(), amount: null }));
-      const cleanIng = [...linked, ...extraIng];
+      const cleanIng = [...linked, ...unmeasuredIng, ...extraIng];
       const url = $("#re-url").value.trim();
       const patch = { name, ingredients: cleanIng, notes: $("#re-notes").value.trim(), url };
       if (editing) {
