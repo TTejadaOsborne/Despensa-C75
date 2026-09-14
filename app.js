@@ -615,12 +615,15 @@ function openIngredientPickerSheet({ title, hint, pool, initialSelected, confirm
       return `
         <div class="pick-row">
           <div class="checkbox ${checked ? "on" : ""}" data-toggle-pid="${pid}" data-default-amt="${pool[pid] ?? 1}">${checked ? "✓" : ""}</div>
-          <div class="pick-name">${escapeHtml(p.name)}<span class="ing-unit" style="flex:0;white-space:nowrap;">tienes ${fmtNum(p.stock)} ${u}</span></div>
+          <div class="pick-name">
+            <div class="pick-name-title">${escapeHtml(p.name)}</div>
+            <div class="pick-name-sub">tienes ${fmtNum(p.stock)} ${u}</div>
+            ${checked ? `<div class="pick-name-sub ${after<0?"neg":""}">quedaría ${fmtNum(after)} ${u}</div>` : ""}
+          </div>
           ${checked ? `<input type="number" step="any" min="0" data-cook-amount="${pid}" value="${amt}">` : ""}
           ${checked ? `<span class="ing-unit">${u}</span>` : ""}
           ${!isPoolItem && checked ? `<button class="dish-remove" data-remove-extra="${pid}" title="Quitar">×</button>` : ""}
-        </div>
-        ${checked ? `<div style="font-size:11px;color:${after<0?"var(--danger)":"var(--text-soft)"};margin:-4px 0 8px 0;padding-left:2px;">quedaría ${fmtNum(after)} ${u}</div>` : ""}`;
+        </div>`;
     };
 
     const html = `
