@@ -333,12 +333,12 @@ function renderMenu() {
         const u = unitOf(p).short;
         return `
           <div class="dish-ing-row">
-            <span class="dish-ing-name">${escapeHtml(p.name)}</span>
-            <input type="number" step="any" min="0" data-dish-ing-amount="${pid}" data-slot="${slot.id}" data-idx="${idx}" value="${amt}">
-            <span class="ing-unit">${u}</span>
+            <span class="dish-ing-name">${escapeHtml(p.name)}<span class="dish-ing-have">tienes ${fmtNum(p.stock)}</span></span>
+            <input type="number" step="any" min="0" class="dish-ing-input" data-dish-ing-amount="${pid}" data-slot="${slot.id}" data-idx="${idx}" value="${amt}">
+            <span class="dish-ing-unit">${u}</span>
+            <span class="dish-ing-after ${after<0?"neg":""}">→ ${fmtNum(after)}</span>
             <button class="dish-remove" data-act="remove-dish-ing" data-slot="${slot.id}" data-idx="${idx}" data-pid="${pid}" title="No usado esta vez">×</button>
-          </div>
-          <div style="font-size:11px;color:${after<0?"var(--danger)":"var(--text-soft)"};margin:-4px 0 6px 2px;">tienes ${fmtNum(p.stock)} ${u} · quedaría ${fmtNum(after)} ${u}</div>`;
+          </div>`;
       }).join("");
 
       return `
