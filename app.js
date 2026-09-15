@@ -32,24 +32,24 @@ const escapeHtml = s => (s || "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&
 const needsRestock = p => !!p.needsBuy;
 const unitOf = p => UNIT_MAP[p.unit] || UNIT_MAP.ud;
 const COUNT_UNITS = ["ud", "bolsa", "bote", "paquete"];
-const ZONE_ICON = {
-  "Platos preparados": "🍱",
-  "Bebidas": "🥤",
-  "Frutas y verduras": "🥦",
-  "Patatas fritas y verdura congelada": "🧊",
-  "Chocolate, helados y congelados": "🍫",
-  "Pescadería": "🐟",
-  "Huevos, arroz y pasta": "🍚",
-  "Carnes": "🥩",
-  "Embutidos y quesos": "🧀",
-  "Baño": "🧴",
-  "Leche y yogures": "🥛",
-  "Pan y desayuno": "🍞",
-  "Café y zumos": "☕",
-  "Limpieza": "🧽",
-  "Otros": "📦"
+const ZONE_COLOR = {
+  "Platos preparados": "#C97C4A",
+  "Bebidas": "#4A90A4",
+  "Frutas y verduras": "#6B9B4F",
+  "Patatas fritas y verdura congelada": "#6FA8C9",
+  "Chocolate, helados y congelados": "#8B5E83",
+  "Pescadería": "#3E7C8C",
+  "Huevos, arroz y pasta": "#D4A24C",
+  "Carnes": "#B4514A",
+  "Embutidos y quesos": "#C9A227",
+  "Baño": "#7C9AA6",
+  "Leche y yogures": "#8FA6B8",
+  "Pan y desayuno": "#C89050",
+  "Café y zumos": "#7A5230",
+  "Limpieza": "#5B8266",
+  "Otros": "#9B9B9B"
 };
-const iconFor = p => ZONE_ICON[p.zone] || "📦";
+const colorFor = p => ZONE_COLOR[p.zone] || "#9B9B9B";
 const stepFor = p => (p.customStep != null ? p.customStep : unitOf(p).step);
 const fmtNum = n => { const r = Math.round((n + Number.EPSILON) * 100) / 100; return Number.isInteger(r) ? String(r) : String(r); };
 const fmtQty = p => { const u = unitOf(p); return `${fmtNum(p.stock)} ${u.short}`; };
@@ -236,9 +236,9 @@ function renderInventario() {
       html += `
         <div class="prod-card" data-id="${p.id}">
           <div class="prod-card-top">
-            <span class="prod-icon">${iconFor(p)}</span>
+            <span class="prod-avatar" style="background:${colorFor(p)};">${escapeHtml(p.name.charAt(0).toUpperCase())}</span>
             <button class="cart-toggle ${marked ? "on" : ""}" data-cart="${p.id}" title="Marcar para comprar">
-              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <circle cx="9" cy="20" r="1.4" fill="currentColor" stroke="none"/>
                 <circle cx="18" cy="20" r="1.4" fill="currentColor" stroke="none"/>
                 <path d="M2.5 3h2.2l1.9 11.4a2 2 0 0 0 2 1.6h8.6a2 2 0 0 0 2-1.6l1.4-7.4H6.1"/>
@@ -246,7 +246,6 @@ function renderInventario() {
             </button>
           </div>
           <div class="prod-card-name">${escapeHtml(p.name)}</div>
-          ${p.note ? `<div class="prod-card-note">${escapeHtml(p.note)}</div>` : ""}
           <div class="stepper compact prod-card-stepper">
             <button data-act="dec" data-id="${p.id}">−</button>
             <span class="val">${fmtQty(p)}</span>
