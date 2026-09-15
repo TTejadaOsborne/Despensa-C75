@@ -119,6 +119,27 @@ main {
 
 /* Zone group */
 .zone-group { margin-bottom: 20px; }
+.prod-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.prod-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  padding: 10px 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  cursor: pointer;
+}
+.prod-card-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px; }
+.prod-icon { font-size: 22px; line-height: 1; }
+.prod-card-name { font-size: 13.5px; font-weight: 700; color: var(--text); line-height: 1.25; }
+.prod-card-note { font-size: 10px; color: var(--text-soft); font-style: italic; line-height: 1.2; }
+.prod-card-stepper { margin-top: 6px; justify-content: space-between; width: 100%; }
+.prod-card .cart-toggle { width: 26px; height: 26px; }
 .zone-title {
   font-size: 13px;
   color: var(--text-soft);

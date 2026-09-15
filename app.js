@@ -32,6 +32,24 @@ const escapeHtml = s => (s || "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&
 const needsRestock = p => !!p.needsBuy;
 const unitOf = p => UNIT_MAP[p.unit] || UNIT_MAP.ud;
 const COUNT_UNITS = ["ud", "bolsa", "bote", "paquete"];
+const ZONE_ICON = {
+  "Platos preparados": "🍱",
+  "Bebidas": "🥤",
+  "Frutas y verduras": "🥦",
+  "Patatas fritas y verdura congelada": "🧊",
+  "Chocolate, helados y congelados": "🍫",
+  "Pescadería": "🐟",
+  "Huevos, arroz y pasta": "🍚",
+  "Carnes": "🥩",
+  "Embutidos y quesos": "🧀",
+  "Baño": "🧴",
+  "Leche y yogures": "🥛",
+  "Pan y desayuno": "🍞",
+  "Café y zumos": "☕",
+  "Limpieza": "🧽",
+  "Otros": "📦"
+};
+const iconFor = p => ZONE_ICON[p.zone] || "📦";
 const stepFor = p => (p.customStep != null ? p.customStep : unitOf(p).step);
 const fmtNum = n => { const r = Math.round((n + Number.EPSILON) * 100) / 100; return Number.isInteger(r) ? String(r) : String(r); };
 const fmtQty = p => { const u = unitOf(p); return `${fmtNum(p.stock)} ${u.short}`; };
@@ -212,32 +230,31 @@ function renderInventario() {
     if (!byLocation[loc]) return;
     if (selectedLocation === "Todas") html += `<div class="zone-group"><div class="zone-title">${escapeHtml(loc)}</div>`;
     else html += `<div class="zone-group">`;
+    html += `<div class="prod-grid">`;
     byLocation[loc].forEach(p => {
       const marked = needsRestock(p);
       html += `
-        <div class="product-row compact" data-id="${p.id}">
-          <button class="cart-toggle ${marked ? "on" : ""}" data-cart="${p.id}" title="Marcar para comprar">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="9" cy="20" r="1.4" fill="currentColor" stroke="none"/>
-              <circle cx="18" cy="20" r="1.4" fill="currentColor" stroke="none"/>
-              <path d="M2.5 3h2.2l1.9 11.4a2 2 0 0 0 2 1.6h8.6a2 2 0 0 0 2-1.6l1.4-7.4H6.1"/>
-            </svg>
-          </button>
-          <div class="product-info">
-            <div class="product-name">${escapeHtml(p.name)}</div>
-            <div class="product-meta">
-              <span class="chip">${escapeHtml(p.zone)}</span>
-            </div>
-            ${p.note ? `<div style="font-size:10.5px;color:var(--text-soft);font-style:italic;margin-top:2px;">${escapeHtml(p.note)}</div>` : ""}
+        <div class="prod-card" data-id="${p.id}">
+          <div class="prod-card-top">
+            <span class="prod-icon">${iconFor(p)}</span>
+            <button class="cart-toggle ${marked ? "on" : ""}" data-cart="${p.id}" title="Marcar para comprar">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="9" cy="20" r="1.4" fill="currentColor" stroke="none"/>
+                <circle cx="18" cy="20" r="1.4" fill="currentColor" stroke="none"/>
+                <path d="M2.5 3h2.2l1.9 11.4a2 2 0 0 0 2 1.6h8.6a2 2 0 0 0 2-1.6l1.4-7.4H6.1"/>
+              </svg>
+            </button>
           </div>
-          <div class="stepper compact">
+          <div class="prod-card-name">${escapeHtml(p.name)}</div>
+          ${p.note ? `<div class="prod-card-note">${escapeHtml(p.note)}</div>` : ""}
+          <div class="stepper compact prod-card-stepper">
             <button data-act="dec" data-id="${p.id}">−</button>
             <span class="val">${fmtQty(p)}</span>
             <button data-act="inc" data-id="${p.id}">+</button>
           </div>
         </div>`;
     });
-    html += `</div>`;
+    html += `</div></div>`;
   });
   $("#invList").innerHTML = html;
 }
@@ -259,12 +276,12 @@ $("#invList").addEventListener("click", e => {
     updateProduct(p.id, { stock: next });
     return;
   }
-  const row = e.target.closest(".product-row");
+  const row = e.target.closest(".prod-card");
   if (row) openProductSheet(products.find(x => x.id === row.dataset.id));
 });
 let pressTimer = null;
 $("#invList").addEventListener("touchstart", e => {
-  const row = e.target.closest(".product-row");
+  const row = e.target.closest(".prod-card");
   if (!row) return;
   pressTimer = setTimeout(() => openProductSheet(products.find(x => x.id === row.dataset.id)), 480);
 });
