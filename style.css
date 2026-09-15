@@ -710,9 +710,63 @@ nav.tabbar .badge {
 }
 .pick-row:last-child { border-bottom: none; }
 .pick-name { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.pick-name-title { font-size: 14px; font-weight: 600; color: var(--text); }
-.pick-name-sub { font-size: 11px; color: var(--text-soft); }
-.pick-name-sub.neg { color: var(--danger); font-weight: 600; }
+.re-name-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  font-size: 18px;
+  font-weight: 700;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--bg);
+  margin-bottom: 10px;
+}
+.re-toggle-link {
+  display: inline-block;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-soft);
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 7px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  margin-bottom: 14px;
+}
+.re-search-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 16px;
+  font-family: inherit;
+  background: var(--bg);
+  color: var(--text);
+  margin: 4px 0 10px;
+}
+.ing-chip-picker { max-height: 240px; overflow-y: auto; margin-bottom: 14px; }
+.ing-chip-loc { font-size: 10.5px; font-weight: 700; color: var(--text-soft); text-transform: uppercase; letter-spacing: 0.03em; margin: 10px 0 6px; }
+.ing-chip-loc:first-child { margin-top: 0; }
+.ing-chip-wrap { display: flex; flex-wrap: wrap; gap: 7px; }
+.ing-chip {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 13px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.ing-chip:active { background: var(--primary-soft); border-color: var(--primary); color: var(--primary); }
+.pick-name-title { font-size: 16px; font-weight: 700; color: var(--text); line-height: 1.25; }
+.pick-name-sub { font-size: 12.5px; font-weight: 600; line-height: 1.35; }
+.pick-name-sub.have { color: #C0645A; }
+.pick-name-sub.after { color: var(--primary); }
+.pick-name-sub.after.neg { color: var(--danger); font-weight: 700; }
 .pick-row input[type=number] {
   width: 64px;
   padding: 6px 8px;

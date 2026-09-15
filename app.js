@@ -617,8 +617,8 @@ function openIngredientPickerSheet({ title, hint, pool, initialSelected, confirm
           <div class="checkbox ${checked ? "on" : ""}" data-toggle-pid="${pid}" data-default-amt="${pool[pid] ?? 1}">${checked ? "✓" : ""}</div>
           <div class="pick-name">
             <div class="pick-name-title">${escapeHtml(p.name)}</div>
-            <div class="pick-name-sub">tienes ${fmtNum(p.stock)} ${u}</div>
-            ${checked ? `<div class="pick-name-sub ${after<0?"neg":""}">quedaría ${fmtNum(after)} ${u}</div>` : ""}
+            <div class="pick-name-sub have">tienes ${fmtNum(p.stock)} ${u}</div>
+            ${checked ? `<div class="pick-name-sub after ${after<0?"neg":""}">quedaría ${fmtNum(after)} ${u}</div>` : ""}
           </div>
           ${checked ? `<input type="number" step="any" min="0" data-cook-amount="${pid}" value="${amt}">` : ""}
           ${checked ? `<span class="ing-unit">${u}</span>` : ""}
@@ -983,77 +983,70 @@ function openRecipeEditor(recipe, onSaved) {
     linkedAmounts[i.productId] = i.amount ?? "";
     if (i.unmeasured) unmeasured[i.productId] = true;
   });
-  const extras = initial.filter(i => !i.productId).map(i => i.name);
   let filterText = "";
   let currentName = recipe?.name || "";
   let currentUrl = recipe?.url || "";
+  let currentNotes = recipe?.notes || "";
+  let urlOpen = !!currentUrl;
+  let notesOpen = !!currentNotes;
 
   const render = () => {
+    const selectedPids = Object.keys(linkedAmounts).filter(pid => linkedAmounts[pid] !== "" || unmeasured[pid]);
     const html = `
       <div class="overlay" id="ov2">
         <div class="sheet">
           <h3>${editing ? "Editar receta" : "Nueva receta"}</h3>
-          <div class="field"><label>Nombre</label><input type="text" id="re-name" value="${escapeHtml(currentName)}" placeholder="Ej. Salmón con verduras"></div>
-          <div class="field"><label>Enlace a la receta original (opcional)</label>
-            <input type="text" id="re-url" value="${escapeHtml(currentUrl)}" placeholder="https://...">
-          </div>
-          <div class="field" style="margin-bottom:6px;"><label>Ingredientes de esta receta</label></div>
+          <input type="text" id="re-name" class="re-name-input" value="${escapeHtml(currentName)}" placeholder="Nombre de la receta">
+
+          ${urlOpen
+            ? `<div class="field"><input type="text" id="re-url" value="${escapeHtml(currentUrl)}" placeholder="https://enlace a la receta"></div>`
+            : `<button class="re-toggle-link" id="re-openUrl">🔗 Añadir enlace</button>`}
+
           <div id="selectedIngRows">
-            ${(() => {
-              const selectedPids = Object.keys(linkedAmounts).filter(pid => linkedAmounts[pid] !== "" || unmeasured[pid]);
-              if (selectedPids.length === 0) return `<div style="font-size:12.5px;color:var(--text-soft);margin-bottom:10px;">Aún no has añadido ninguno — búscalo debajo.</div>`;
-              return selectedPids.map(pid => {
-                const p = products.find(x => x.id === pid);
-                if (!p) return "";
-                const isUnmeasured = !!unmeasured[pid];
-                return `
-                  <div class="pick-row">
-                    <div class="pick-name">${escapeHtml(p.name)}<span class="ing-unit" style="flex:0;white-space:nowrap;">tienes ${fmtNum(p.stock)} ${unitOf(p).short}</span></div>
-                    ${isUnmeasured
-                      ? `<span class="unmeasured-tag">no se mide</span>`
-                      : `<input type="number" step="any" min="0" data-pid-amount="${p.id}" value="${linkedAmounts[pid]}">
-                         <span class="ing-unit">${unitOf(p).short}</span>`}
-                    <button class="dish-remove" data-remove-linked="${p.id}" title="Quitar">×</button>
+            ${selectedPids.map(pid => {
+              const p = products.find(x => x.id === pid);
+              if (!p) return "";
+              const isUnmeasured = !!unmeasured[pid];
+              return `
+                <div class="pick-row">
+                  <div class="pick-name">
+                    <div class="pick-name-title">${escapeHtml(p.name)}</div>
+                    ${!isUnmeasured ? `<div class="pick-name-sub have">tienes ${fmtNum(p.stock)} ${unitOf(p).short}</div>` : ""}
                   </div>
-                  <div class="unmeasured-toggle">
-                    <input type="checkbox" id="um-${pid}" data-toggle-unmeasured="${pid}" ${isUnmeasured ? "checked" : ""}>
-                    <label for="um-${pid}">⚖️ No medir — entra en la receta pero no resta del inventario</label>
-                  </div>`;
-              }).join("");
-            })()}
+                  ${isUnmeasured
+                    ? `<span class="unmeasured-tag">no se mide</span>`
+                    : `<input type="number" step="any" min="0" data-pid-amount="${p.id}" value="${linkedAmounts[pid]}">
+                       <span class="ing-unit">${unitOf(p).short}</span>`}
+                  <button class="dish-remove" data-remove-linked="${p.id}" title="Quitar">×</button>
+                </div>
+                <div class="unmeasured-toggle">
+                  <input type="checkbox" id="um-${pid}" data-toggle-unmeasured="${pid}" ${isUnmeasured ? "checked" : ""}>
+                  <label for="um-${pid}">⚖️ No medir</label>
+                </div>`;
+            }).join("")}
           </div>
-          <div class="field"><label>Buscar y añadir ingrediente de tu despensa</label>
-            <input type="text" id="re-filter" placeholder="Buscar producto…" value="${escapeHtml(filterText)}">
-          </div>
-          <div id="ingPicker" style="max-height:280px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-s);margin-bottom:14px;">
+
+          <input type="text" id="re-filter" class="re-search-input" placeholder="🔍 Buscar ingrediente para añadir…" value="${escapeHtml(filterText)}">
+          <div id="ingPicker" class="ing-chip-picker">
             ${(() => {
               const candidates = products.filter(p => !((p.id in linkedAmounts && linkedAmounts[p.id] !== "") || unmeasured[p.id]) && p.name.toLowerCase().includes(filterText.toLowerCase()));
-              if (candidates.length === 0) return `<div style="padding:14px;font-size:13px;color:var(--text-soft);">Sin productos que coincidan.</div>`;
+              if (candidates.length === 0) return `<div style="padding:12px 4px;font-size:12.5px;color:var(--text-soft);">Sin productos que coincidan.</div>`;
               const byLoc = {};
               candidates.forEach(p => { (byLoc[p.location] ||= []).push(p); });
               Object.values(byLoc).forEach(list => list.sort((a, b) => a.name.localeCompare(b.name, "es")));
               return LOCATIONS.filter(loc => byLoc[loc]).map(loc => `
-                <div style="padding:7px 12px;font-size:11px;font-weight:700;color:var(--text-soft);background:var(--bg);text-transform:uppercase;">${escapeHtml(loc)}</div>
-                ${byLoc[loc].map(p => `
-                  <div class="pick-row" data-add-linked="${p.id}" style="cursor:pointer;">
-                    <div class="pick-name">${escapeHtml(p.name)}<span class="chip" style="margin-left:6px;">${escapeHtml(p.zone)}</span></div>
-                    <span class="ing-unit">${escapeHtml(unitOf(p).short)}</span>
-                  </div>`).join("")}
+                <div class="ing-chip-loc">${escapeHtml(loc)}</div>
+                <div class="ing-chip-wrap">
+                  ${byLoc[loc].map(p => `<button class="ing-chip" data-add-linked="${p.id}">${escapeHtml(p.name)}</button>`).join("")}
+                </div>
               `).join("");
             })()}
           </div>
-          <div class="field">
-            <label>Otros ingredientes sin vincular (opcional — no cuentan para el stock)</label>
-            <div id="extraRows">
-              ${extras.map((name, i) => `
-                <div class="ing-row" data-ei="${i}" style="margin-bottom:8px;">
-                  <input type="text" data-ef="name" placeholder="Ej. sal al gusto" value="${escapeHtml(name)}" style="flex:1;">
-                  <button data-act="rm-extra" data-ei="${i}" style="background:none;border:none;color:var(--danger);font-size:18px;">×</button>
-                </div>`).join("")}
-            </div>
-            <button class="mini-link" id="re-addExtra">+ Añadir ingrediente suelto</button>
-          </div>
-          <div class="field"><label>Notas / pasos (opcional)</label><textarea id="re-notes">${escapeHtml(recipe?.notes||"")}</textarea></div>
+
+          ${notesOpen
+            ? `<div class="field" style="margin-top:14px;"><textarea id="re-notes" placeholder="Notas, pasos…">${escapeHtml(currentNotes)}</textarea></div>`
+            : `<button class="re-toggle-link" id="re-openNotes" style="margin-top:10px;">📝 Añadir notas</button>`}
+
           <div class="sheet-actions">
             ${editing ? `<button class="btn btn-danger" id="re-delete">Eliminar</button>` : ""}
             <button class="btn btn-secondary" id="re-cancel">Cancelar</button>
@@ -1065,13 +1058,15 @@ function openRecipeEditor(recipe, onSaved) {
     $("#re-cancel").addEventListener("click", closeSheet);
     $("#ov2").addEventListener("click", e => { if (e.target.id === "ov2") closeSheet(); });
     $("#re-name").addEventListener("input", e => { currentName = e.target.value; });
-    $("#re-url").addEventListener("input", e => { currentUrl = e.target.value; });
+
+    $("#re-openUrl")?.addEventListener("click", () => { urlOpen = true; render(); $("#re-url").focus(); });
+    $("#re-url")?.addEventListener("input", e => { currentUrl = e.target.value; });
+    $("#re-openNotes")?.addEventListener("click", () => { notesOpen = true; render(); $("#re-notes").focus(); });
+    $("#re-notes")?.addEventListener("input", e => { currentNotes = e.target.value; });
 
     $("#re-filter").addEventListener("input", e => { filterText = e.target.value; render(); });
-    // Reponer el foco y el cursor en el buscador tras cada render (se pierde al regenerar el HTML)
     const fInput = $("#re-filter");
-    fInput.focus();
-    fInput.selectionStart = fInput.selectionEnd = fInput.value.length;
+    if (filterText) { fInput.focus(); fInput.selectionStart = fInput.selectionEnd = fInput.value.length; }
 
     $$('[data-pid-amount]').forEach(inp => {
       inp.addEventListener("click", e => e.stopPropagation());
@@ -1093,17 +1088,11 @@ function openRecipeEditor(recipe, onSaved) {
       delete unmeasured[btn.dataset.removeLinked];
       render();
     }));
-    $$('[data-add-linked]').forEach(row => row.addEventListener("click", () => {
-      linkedAmounts[row.dataset.addLinked] = 1;
+    $$('[data-add-linked]').forEach(chip => chip.addEventListener("click", () => {
+      linkedAmounts[chip.dataset.addLinked] = 1;
       filterText = "";
       render();
     }));
-
-    $("#re-addExtra").addEventListener("click", () => { extras.push(""); render(); });
-    $$('[data-act="rm-extra"]').forEach(b => b.addEventListener("click", () => { extras.splice(Number(b.dataset.ei), 1); render(); }));
-    $$('#extraRows [data-ef="name"]').forEach(inp => {
-      inp.addEventListener("change", () => { extras[Number(inp.closest("[data-ei]").dataset.ei)] = inp.value; });
-    });
 
     if (editing) {
       $("#re-delete").addEventListener("click", () => {
@@ -1126,10 +1115,8 @@ function openRecipeEditor(recipe, onSaved) {
         const p = products.find(x => x.id === pid);
         return { productId: pid, name: p ? p.name : "", amount: null, unmeasured: true };
       });
-      const extraIng = extras.filter(n => n && n.trim()).map(n => ({ productId: "", name: n.trim(), amount: null }));
-      const cleanIng = [...linked, ...unmeasuredIng, ...extraIng];
-      const url = $("#re-url").value.trim();
-      const patch = { name, ingredients: cleanIng, notes: $("#re-notes").value.trim(), url };
+      const cleanIng = [...linked, ...unmeasuredIng];
+      const patch = { name, ingredients: cleanIng, notes: currentNotes.trim(), url: currentUrl.trim() };
       if (editing) {
         await updateRecipe(recipe.id, patch);
         closeSheet();
