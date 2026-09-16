@@ -236,9 +236,8 @@ function renderInventario() {
       html += `
         <div class="prod-card" data-id="${p.id}">
           <div class="prod-card-top">
-            <span class="prod-avatar" style="background:${colorFor(p)};">${escapeHtml(p.name.charAt(0).toUpperCase())}</span>
             <button class="cart-toggle ${marked ? "on" : ""}" data-cart="${p.id}" title="Marcar para comprar">
-              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <circle cx="9" cy="20" r="1.4" fill="currentColor" stroke="none"/>
                 <circle cx="18" cy="20" r="1.4" fill="currentColor" stroke="none"/>
                 <path d="M2.5 3h2.2l1.9 11.4a2 2 0 0 0 2 1.6h8.6a2 2 0 0 0 2-1.6l1.4-7.4H6.1"/>
@@ -294,32 +293,40 @@ $("#btnOpenCalendar").addEventListener("click", () => openCalendarPicker());
 function openProductSheet(product) {
   const editing = !!product;
   const p = product || { name: "", zone: ZONES[0], location: "Despensa", stock: 1, unit: "ud", note: "", needsBuy: false };
-  const html = `
+  let noteOpen = !!(p.note && p.note.trim());
+  let currentNote = p.note || "";
+
+  const render = () => {
+    const html = `
     <div class="overlay" id="ov">
       <div class="sheet">
         <h3>${editing ? "Editar producto" : "Añadir producto"}</h3>
-        <div class="field"><label>Nombre</label><input type="text" id="f-name" value="${escapeHtml(p.name)}" placeholder="Ej. Leche entera"></div>
+        <input type="text" id="f-name" class="re-name-input" value="${escapeHtml(p.name)}" placeholder="Nombre del producto">
+
         <div class="field-row">
-          <div class="field"><label>Ubicación en casa</label>
+          <div class="field"><label>Ubicación</label>
             <select id="f-location">${LOCATIONS.map(l => `<option ${l===p.location?"selected":""}>${l}</option>`).join("")}</select>
           </div>
-          <div class="field"><label>Zona Mercadona</label>
+          <div class="field"><label>Zona</label>
             <select id="f-zone">${ZONES.map(z => `<option ${z===p.zone?"selected":""}>${escapeHtml(z)}</option>`).join("")}</select>
           </div>
         </div>
         <div class="field-row">
-          <div class="field"><label>Unidad de medida</label>
+          <div class="field"><label>Unidad</label>
             <select id="f-unit">${UNITS.map(u => `<option value="${u.id}" ${(p.unit||"ud")===u.id?"selected":""}>${u.label}</option>`).join("")}</select>
           </div>
           <div class="field"><label>Stock actual</label><input type="number" id="f-stock" value="${p.stock}" min="0" step="any"></div>
         </div>
-        <div class="check-field" id="f-halfstep-wrap" style="display:${COUNT_UNITS.includes(p.unit||"ud")?"flex":"none"};">
+
+        <div class="check-field-highlight" id="f-halfstep-wrap" style="display:${COUNT_UNITS.includes(p.unit||"ud")?"flex":"none"};">
           <input type="checkbox" id="f-halfstep" ${p.customStep === 1 ? "" : "checked"}>
-          <label for="f-halfstep" style="margin:0;">Permitir medias unidades con los botones +/− (ej. 1/2 aguacate). Desmárcalo para algo que siempre es entero, como los huevos.</label>
+          <label for="f-halfstep">⚖️ Permitir medias unidades (1/2 aguacate). Desmárcalo si siempre es entero, como los huevos.</label>
         </div>
-        <div class="field"><label>Nota (opcional) — ej. "cada bolsa lleva 4 filetes"</label>
-          <input type="text" id="f-note" value="${escapeHtml(p.note || "")}" placeholder="Contenido de cada unidad, si ayuda a recordarlo">
-        </div>
+
+        ${noteOpen
+          ? `<div class="field"><input type="text" id="f-note" value="${escapeHtml(currentNote)}" placeholder="Nota — ej. cada bolsa lleva 4 filetes"></div>`
+          : `<button class="re-toggle-link" id="f-openNote">📝 Añadir nota</button>`}
+
         <div class="check-field"><input type="checkbox" id="f-needbuy" ${p.needsBuy ? "checked" : ""}><label for="f-needbuy" style="margin:0;">Necesario para la compra</label></div>
         <div class="sheet-actions">
           ${editing ? `<button class="btn btn-danger" id="f-delete">Eliminar</button>` : ""}
@@ -328,37 +335,41 @@ function openProductSheet(product) {
         </div>
       </div>
     </div>`;
-  $("#modalRoot").innerHTML = html;
-  $("#f-unit").addEventListener("change", e => {
-    $("#f-halfstep-wrap").style.display = COUNT_UNITS.includes(e.target.value) ? "flex" : "none";
-  });
-  $("#f-cancel").addEventListener("click", closeSheet);
-  $("#ov").addEventListener("click", e => { if (e.target.id === "ov") closeSheet(); });
-  if (editing) {
-    $("#f-delete").addEventListener("click", () => {
-      openConfirm("Eliminar producto", `¿Seguro que quieres eliminar "${p.name}"?`, "Eliminar", () => {
-        deleteProduct(p.id);
-        closeSheet();
-      }, true);
+    $("#modalRoot").innerHTML = html;
+    $("#f-unit").addEventListener("change", e => {
+      $("#f-halfstep-wrap").style.display = COUNT_UNITS.includes(e.target.value) ? "flex" : "none";
     });
-  }
-  $("#f-save").addEventListener("click", () => {
-    const name = $("#f-name").value.trim();
-    if (!name) { $("#f-name").focus(); return; }
-    const unitVal = $("#f-unit").value;
-    const patch = {
-      name,
-      location: $("#f-location").value,
-      zone: $("#f-zone").value,
-      unit: unitVal,
-      stock: Number($("#f-stock").value) || 0,
-      note: $("#f-note").value.trim(),
-      needsBuy: $("#f-needbuy").checked,
-      customStep: COUNT_UNITS.includes(unitVal) && !$("#f-halfstep").checked ? 1 : null
-    };
-    if (editing) updateProduct(p.id, patch); else addProduct(patch);
-    closeSheet();
-  });
+    $("#f-cancel").addEventListener("click", closeSheet);
+    $("#ov").addEventListener("click", e => { if (e.target.id === "ov") closeSheet(); });
+    $("#f-openNote")?.addEventListener("click", () => { noteOpen = true; render(); $("#f-note").focus(); });
+    $("#f-note")?.addEventListener("input", e => { currentNote = e.target.value; });
+    if (editing) {
+      $("#f-delete").addEventListener("click", () => {
+        openConfirm("Eliminar producto", `¿Seguro que quieres eliminar "${p.name}"?`, "Eliminar", () => {
+          deleteProduct(p.id);
+          closeSheet();
+        }, true);
+      });
+    }
+    $("#f-save").addEventListener("click", () => {
+      const name = $("#f-name").value.trim();
+      if (!name) { $("#f-name").focus(); return; }
+      const unitVal = $("#f-unit").value;
+      const patch = {
+        name,
+        location: $("#f-location").value,
+        zone: $("#f-zone").value,
+        unit: unitVal,
+        stock: Number($("#f-stock").value) || 0,
+        note: currentNote.trim(),
+        needsBuy: $("#f-needbuy").checked,
+        customStep: COUNT_UNITS.includes(unitVal) && !$("#f-halfstep").checked ? 1 : null
+      };
+      if (editing) updateProduct(p.id, patch); else addProduct(patch);
+      closeSheet();
+    });
+  };
+  render();
 }
 function closeSheet() { $("#modalRoot").innerHTML = ""; }
 
