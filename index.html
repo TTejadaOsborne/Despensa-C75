@@ -29,6 +29,7 @@
 
     <!-- INVENTARIO -->
     <section class="view active" id="view-inventario">
+      <div id="invSearch"></div>
       <div class="day-tabs" id="invLocTabs"></div>
       <div id="invList"></div>
     </section>
@@ -38,6 +39,7 @@
       <div class="day-tabs-row">
         <div class="day-tabs" id="dayTabs"></div>
         <button class="cal-btn" id="btnOpenCalendar" title="Ir a una fecha">📅</button>
+        <button class="cal-btn" id="btnWeekView" title="Ver semana">🗓️</button>
       </div>
       <div id="menuBody"></div>
     </section>
@@ -55,7 +57,12 @@
 
     <!-- HISTORIAL -->
     <section class="view" id="view-historial">
-      <div class="section-head"><h2>Historial de compras</h2><button class="mini-link" id="btnClearHistory" style="color:var(--danger);">🗑️ Borrar historial</button></div>
+      <div class="section-head"><h2>Historial de compras</h2>
+        <span style="display:flex;gap:12px;">
+          <button class="mini-link" id="btnExportBackup">⬇️ Exportar copia</button>
+          <button class="mini-link" id="btnClearHistory" style="color:var(--danger);">🗑️ Borrar historial</button>
+        </span>
+      </div>
       <div id="histList"></div>
     </section>
 

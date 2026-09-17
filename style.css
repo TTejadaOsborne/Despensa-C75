@@ -384,6 +384,45 @@ main {
 .cal-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .cal-nav button { background: none; border: none; font-size: 20px; color: var(--primary); cursor: pointer; padding: 4px 10px; }
 .cal-nav .cal-title { font-family: "Fraunces", serif; font-size: 16px; font-weight: 600; text-transform: capitalize; }
+.week-table { display: flex; flex-direction: column; gap: 2px; max-height: 60vh; overflow-y: auto; }
+.week-row {
+  display: grid;
+  grid-template-columns: 42px 1fr 1fr 1fr;
+  gap: 6px;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+.week-row:active { background: var(--primary-soft); }
+.week-head {
+  cursor: default;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-soft);
+  text-transform: uppercase;
+  border-bottom: 1.5px solid var(--text);
+  padding-bottom: 6px;
+}
+.week-head:active { background: none; }
+.week-day {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+.week-day span { font-size: 10px; font-weight: 400; color: var(--text-soft); }
+.week-cell {
+  font-size: 11px;
+  color: var(--text-soft);
+  line-height: 1.3;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+.week-cell.cooked { color: var(--primary); font-weight: 600; }
 .day-tabs {
   display: flex;
   gap: 6px;

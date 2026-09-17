@@ -22,6 +22,7 @@ let inspirations = [];
 let shoppingChecked = {}; // { productId: true }
 let selectedDayOffset = 0;
 let selectedLocation = "Todas";
+let invSearchText = "";
 let dishAddSearch = {}; // "slot-idx" -> { open, filter }
 let menuScrolledToToday = false;
 let syncFlags = { products: false, recipes: false, menu: false, history: false, shopping: false, inspirations: false };
@@ -199,12 +200,57 @@ function openCalendarPicker() {
   render();
 }
 
+function openWeekView() {
+  const html = `
+    <div class="overlay" id="ovWeek">
+      <div class="sheet">
+        <h3>Esta semana</h3>
+        <div class="week-table">
+          <div class="week-row week-head">
+            <div class="week-day"></div>
+            <div>Desayuno</div>
+            <div>Comida</div>
+            <div>Cena</div>
+          </div>
+          ${Array.from({ length: 7 }, (_, i) => i).map(offset => {
+            const dateStr = dateStrFor(offset);
+            const l = labelFor(offset);
+            const cells = MEAL_SLOTS.map(slot => {
+              const { dishes, cooked } = getSlotData(dateStr, slot.id);
+              const names = (cooked?.dishNames?.length ? cooked.dishNames : dishes.map(d => d.recipeName || d.freeText || "").filter(Boolean));
+              const label = names.length ? names.join(", ") : "—";
+              return `<div class="week-cell ${cooked ? "cooked" : ""}">${escapeHtml(label)}</div>`;
+            }).join("");
+            return `
+              <div class="week-row" data-offset="${offset}">
+                <div class="week-day">${escapeHtml(l.dname)}<span>${escapeHtml(l.dnum)}</span></div>
+                ${cells}
+              </div>`;
+          }).join("")}
+        </div>
+        <div class="sheet-actions" style="margin-top:14px;">
+          <button class="btn btn-secondary btn-block" id="week-close">Cerrar</button>
+        </div>
+      </div>
+    </div>`;
+  $("#modalRoot").innerHTML = html;
+  $("#week-close").addEventListener("click", closeSheet);
+  $("#ovWeek").addEventListener("click", e => { if (e.target.id === "ovWeek") closeSheet(); });
+  $$('.week-row[data-offset]').forEach(row => row.addEventListener("click", () => {
+    selectedDayOffset = Number(row.dataset.offset);
+    closeSheet();
+    renderMenu();
+    scrollToSelectedDay();
+  }));
+}
+
 // ==================================================================
 // RENDER: INVENTARIO
 // ==================================================================
 
 function renderInventario() {
   if (products.length === 0) {
+    $("#invSearch").innerHTML = "";
     $("#invLocTabs").innerHTML = "";
     $("#invList").innerHTML = emptyState("🧺", "Tu despensa está vacía", "Pulsa el botón + para añadir tu primer producto.");
     return;
@@ -220,15 +266,27 @@ function renderInventario() {
   }).join("");
   $$(".loc-tab").forEach(b => b.addEventListener("click", () => { selectedLocation = b.dataset.loc; renderInventario(); }));
 
-  const visible = selectedLocation === "Todas" ? products : products.filter(p => p.location === selectedLocation);
+  $("#invSearch").innerHTML = `<input type="text" id="inv-search-input" class="re-search-input" placeholder="🔍 Buscar en tu despensa…" value="${escapeHtml(invSearchText)}">`;
+  const searchInput = $("#inv-search-input");
+  searchInput.addEventListener("input", e => { invSearchText = e.target.value; renderInventario(); });
+  if (invSearchText) { searchInput.focus(); searchInput.selectionStart = searchInput.selectionEnd = searchInput.value.length; }
+
+  const searching = invSearchText.trim() !== "";
+  const base = searching ? products : (selectedLocation === "Todas" ? products : products.filter(p => p.location === selectedLocation));
+  const visible = searching ? base.filter(p => p.name.toLowerCase().includes(invSearchText.trim().toLowerCase())) : base;
   const byLocation = {};
   visible.forEach(p => { (byLocation[p.location] ||= []).push(p); });
   Object.values(byLocation).forEach(list => list.sort((a, b) => a.name.localeCompare(b.name, "es")));
 
+  if (searching && visible.length === 0) {
+    $("#invList").innerHTML = emptyState("🔍", "Sin resultados", `Nada coincide con "${escapeHtml(invSearchText.trim())}".`);
+    return;
+  }
+
   let html = "";
   LOCATIONS.forEach(loc => {
     if (!byLocation[loc]) return;
-    if (selectedLocation === "Todas") html += `<div class="zone-group"><div class="zone-title">${escapeHtml(loc)}</div>`;
+    if (selectedLocation === "Todas" || searching) html += `<div class="zone-group"><div class="zone-title">${escapeHtml(loc)}</div>`;
     else html += `<div class="zone-group">`;
     html += `<div class="prod-grid">`;
     byLocation[loc].forEach(p => {
@@ -289,6 +347,7 @@ $("#invList").addEventListener("touchmove", () => clearTimeout(pressTimer));
 $("#fabAdd").addEventListener("click", () => openProductSheet(null));
 $("#fabNewRecipe").addEventListener("click", () => openRecipeEditor(null));
 $("#btnOpenCalendar").addEventListener("click", () => openCalendarPicker());
+$("#btnWeekView").addEventListener("click", () => openWeekView());
 
 function openProductSheet(product) {
   const editing = !!product;
@@ -1811,6 +1870,26 @@ $("#histList").addEventListener("click", e => {
 // ==================================================================
 // BANNER DE RECORDATORIOS (descongelar)
 // ==================================================================
+$("#btnExportBackup").addEventListener("click", () => {
+  const data = {
+    exportedAt: new Date().toISOString(),
+    despensa: "Copia de seguridad completa",
+    products,
+    recipes,
+    menu: menuByDate,
+    history,
+    inspirations
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `despensa-backup-${dateStrFor(0)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+});
 $("#btnClearHistory").addEventListener("click", () => {
   const visible = history.filter(h => h.type !== "cooked");
   if (visible.length === 0) return;
