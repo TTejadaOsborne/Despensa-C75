@@ -201,10 +201,15 @@ function openCalendarPicker() {
 }
 
 function openWeekView() {
+  const d = new Date();
+  d.setDate(d.getDate() + selectedDayOffset);
+  const dow = (d.getDay() + 6) % 7; // lunes = 0 ... domingo = 6
+  const mondayOffset = selectedDayOffset - dow;
+
   const html = `
     <div class="overlay" id="ovWeek">
       <div class="sheet">
-        <h3>Esta semana</h3>
+        <h3>Semana del ${escapeHtml(labelFor(mondayOffset).dnum)} al ${escapeHtml(labelFor(mondayOffset + 6).dnum)}</h3>
         <div class="week-table">
           <div class="week-row week-head">
             <div class="week-day"></div>
@@ -212,7 +217,7 @@ function openWeekView() {
             <div>Comida</div>
             <div>Cena</div>
           </div>
-          ${Array.from({ length: 7 }, (_, i) => i).map(offset => {
+          ${Array.from({ length: 7 }, (_, i) => mondayOffset + i).map(offset => {
             const dateStr = dateStrFor(offset);
             const l = labelFor(offset);
             const cells = MEAL_SLOTS.map(slot => {
