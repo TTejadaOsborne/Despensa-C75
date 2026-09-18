@@ -22,7 +22,7 @@ export const ZONES = [
   "Otros"
 ];
 
-export const LOCATIONS = ["Nevera", "Despensa", "Congelador", "Otros"];
+export const LOCATIONS = ["Nevera", "Despensa", "Congelador", "Lavadero", "Baño 1", "Baño 2", "Otros"];
 
 // Unidad de medida por producto, con el incremento (+/-) que tiene sentido para cada una
 export const UNITS = [
