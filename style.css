@@ -331,6 +331,18 @@ main {
   flex-shrink: 0;
   white-space: nowrap;
 }
+.shop-qty-input {
+  width: 46px;
+  flex-shrink: 0;
+  padding: 6px 4px;
+  border: 1px solid var(--primary);
+  border-radius: var(--radius-s);
+  font-size: 16px;
+  text-align: center;
+  color: var(--primary);
+  font-weight: 700;
+}
+.shop-after { color: var(--primary); font-weight: 700; }
 .checkbox {
   width: 24px; height: 24px;
   border-radius: 7px;
@@ -695,6 +707,24 @@ main {
 .hist-body.open { display: block; }
 .hist-body div { padding: 3px 0; border-top: 1px solid var(--border); }
 .hist-body div:first-child { border-top: none; }
+.purchase-card { gap: 12px; align-items: center; }
+.purchase-photo {
+  flex-shrink: 0;
+  width: 52px; height: 52px;
+  border-radius: var(--radius-s);
+  background: var(--bg);
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden;
+  font-size: 22px;
+}
+.purchase-photo img { width: 100%; height: 100%; object-fit: cover; }
+.purchase-info { flex: 1; min-width: 0; }
+.purchase-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.purchase-store { font-size: 15px; font-weight: 700; color: var(--text); }
+.purchase-price { font-size: 15px; font-weight: 700; color: var(--primary); flex-shrink: 0; }
+.purchase-date { font-size: 11.5px; color: var(--text-soft); margin-top: 1px; }
+.purchase-count { font-size: 11px; color: var(--text-soft); margin-top: 1px; }
+.ing-chip.store-chip.on { background: var(--primary); border-color: var(--primary); color: white; }
 
 /* Bottom nav */
 nav.tabbar {

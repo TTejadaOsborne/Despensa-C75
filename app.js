@@ -20,6 +20,7 @@ let menuByDate = {};
 let history = [];
 let inspirations = [];
 let shoppingChecked = {}; // { productId: true }
+let shoppingQty = {}; // { productId: cantidad a comprar }
 let selectedDayOffset = 0;
 let selectedLocation = "Todas";
 let invSearchText = "";
@@ -60,6 +61,7 @@ const DOW = ["Dom","Lun","Mar","Mié","Jue","Vie","Sáb"];
 const shoppingDocRef = doc(db, "state", "shopping");
 onSnapshot(shoppingDocRef, snap => {
   shoppingChecked = snap.exists() ? (snap.data().checked || {}) : {};
+  shoppingQty = snap.exists() ? (snap.data().qty || {}) : {};
   syncFlags.shopping = true;
   renderAll();
 });
@@ -67,10 +69,15 @@ function setShoppingChecked(productId, val) {
   const next = { ...shoppingChecked, [productId]: val };
   setDoc(shoppingDocRef, { checked: next }, { merge: true });
 }
+function setShoppingQty(productId, val) {
+  const next = { ...shoppingQty, [productId]: val };
+  setDoc(shoppingDocRef, { qty: next }, { merge: true });
+}
 function clearShoppingCheckedFor(ids) {
-  const next = { ...shoppingChecked };
-  ids.forEach(id => delete next[id]);
-  setDoc(shoppingDocRef, { checked: next }, { merge: false });
+  const nextChecked = { ...shoppingChecked };
+  const nextQty = { ...shoppingQty };
+  ids.forEach(id => { delete nextChecked[id]; delete nextQty[id]; });
+  setDoc(shoppingDocRef, { checked: nextChecked, qty: nextQty }, { merge: false });
 }
 
 // ---------- Listeners ----------
@@ -1614,15 +1621,18 @@ function renderCompra() {
     html += `<div class="zone-group"><div class="zone-title">${escapeHtml(zone)}</div>`;
     byZone[zone].forEach(p => {
       const on = !!shoppingChecked[p.id];
-      const stockLabel = fmtQty(p);
+      const qty = shoppingQty[p.id] ?? 1;
+      const u = unitOf(p).short;
+      const after = Math.round((p.stock + (Number(qty) || 0) + Number.EPSILON) * 100) / 100;
       html += `
         <div class="shop-row ${on?"checked":""}" data-id="${p.id}">
           <div class="checkbox ${on?"on":""}" data-id="${p.id}">${on ? "✓" : ""}</div>
           <div class="product-info">
             <div class="product-name">${escapeHtml(p.name)}</div>
-            <div class="product-meta">tienes ${fmtQty(p)}</div>
+            <div class="product-meta">tienes ${fmtQty(p)} · tras comprar <span class="shop-after">${fmtNum(after)} ${u}</span></div>
           </div>
-          <div class="shop-needed">${stockLabel}</div>
+          <input type="number" step="any" min="0" class="shop-qty-input" data-qty-id="${p.id}" value="${qty}">
+          <span class="ing-unit">${u}</span>
         </div>`;
     });
     html += `</div>`;
@@ -1630,11 +1640,114 @@ function renderCompra() {
   $("#shopList").innerHTML = html;
 }
 
+$("#shopList").addEventListener("input", e => {
+  const inp = e.target.closest("[data-qty-id]");
+  if (!inp) return;
+  const p = products.find(x => x.id === inp.dataset.qtyId);
+  if (!p) return;
+  const val = inp.value === "" ? 0 : Number(inp.value);
+  const after = Math.round((p.stock + val + Number.EPSILON) * 100) / 100;
+  const row = inp.closest(".shop-row");
+  const afterSpan = row.querySelector(".shop-after");
+  if (afterSpan) afterSpan.textContent = `${fmtNum(after)} ${unitOf(p).short}`;
+});
+$("#shopList").addEventListener("change", e => {
+  const inp = e.target.closest("[data-qty-id]");
+  if (!inp) return;
+  setShoppingQty(inp.dataset.qtyId, inp.value === "" ? 0 : Number(inp.value));
+});
 $("#shopList").addEventListener("click", e => {
+  if (e.target.closest("[data-qty-id]")) return;
   const box = e.target.closest(".checkbox");
   if (!box) return;
   setShoppingChecked(box.dataset.id, !shoppingChecked[box.dataset.id]);
 });
+
+function compressPhotoToDataURL(file, maxDim = 1000, quality = 0.72) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > height && width > maxDim) { height = Math.round(height * maxDim / width); width = maxDim; }
+        else if (height > maxDim) { width = Math.round(width * maxDim / height); height = maxDim; }
+        const canvas = document.createElement("canvas");
+        canvas.width = width; canvas.height = height;
+        canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.onerror = reject;
+      img.src = reader.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function openConfirmPurchaseSheet(needed) {
+  let store = "";
+  let photoData = null;
+
+  const render = () => {
+    const html = `
+      <div class="overlay" id="ovPurchase">
+        <div class="sheet">
+          <h3>Confirmar compra</h3>
+          <div style="font-size:12.5px;color:var(--text-soft);margin-bottom:12px;">${needed.length} producto(s) marcado(s) — el stock se actualizará solo.</div>
+          <div class="field"><label>Tienda</label>
+            <div class="ing-chip-wrap" style="margin-bottom:8px;">
+              <button class="ing-chip store-chip ${store==="Mercadona"?"on":""}" data-store="Mercadona">Mercadona</button>
+              <button class="ing-chip store-chip ${store==="BM"?"on":""}" data-store="BM">BM</button>
+            </div>
+            <input type="text" id="pur-store" placeholder="O escribe otra tienda" value="${escapeHtml(store)}">
+          </div>
+          <div class="field"><label>Precio total (opcional)</label><input type="number" id="pur-price" step="0.01" min="0" placeholder="0,00 €"></div>
+          <div class="field"><label>Foto del ticket (opcional)</label>
+            <input type="file" accept="image/*" capture="environment" id="pur-photo">
+            ${photoData ? `<img src="${photoData}" style="width:100%;border-radius:10px;margin-top:8px;">` : ""}
+          </div>
+          <div class="sheet-actions">
+            <button class="btn btn-secondary" id="pur-cancel">Cancelar</button>
+            <button class="btn btn-primary" id="pur-save">Confirmar</button>
+          </div>
+        </div>
+      </div>`;
+    $("#modalRoot").innerHTML = html;
+    $("#pur-cancel").addEventListener("click", closeSheet);
+    $("#ovPurchase").addEventListener("click", e => { if (e.target.id === "ovPurchase") closeSheet(); });
+    $$('.store-chip').forEach(chip => chip.addEventListener("click", () => {
+      store = chip.dataset.store;
+      render();
+    }));
+    $("#pur-store").addEventListener("input", e => { store = e.target.value; });
+    $("#pur-photo").addEventListener("change", async e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      photoData = await compressPhotoToDataURL(file);
+      render();
+    });
+    $("#pur-save").addEventListener("click", () => {
+      const price = $("#pur-price").value;
+      const items = needed.map(p => ({ name: p.name, amount: shoppingQty[p.id] ?? 1, unit: unitOf(p).short }));
+      needed.forEach(p => {
+        const qty = Number(shoppingQty[p.id] ?? 1) || 0;
+        const nextStock = Math.round((p.stock + qty + Number.EPSILON) * 100) / 100;
+        updateProduct(p.id, { needsBuy: false, stock: nextStock });
+      });
+      addHistoryEntry({
+        items,
+        type: "purchase",
+        store: store.trim() || null,
+        price: price ? Number(price) : null,
+        photo: photoData
+      });
+      clearShoppingCheckedFor(needed.map(p => p.id));
+      closeSheet();
+    });
+  };
+  render();
+}
 
 $("#btnConfirmPurchase").addEventListener("click", () => {
   const needed = products.filter(p => needsRestock(p) && shoppingChecked[p.id]);
@@ -1642,13 +1755,7 @@ $("#btnConfirmPurchase").addEventListener("click", () => {
     openConfirm("Nada marcado", "Marca los productos que has comprado antes de confirmar.", "Entendido", closeSheet);
     return;
   }
-  openConfirm("Confirmar compra", `Se quitarán ${needed.length} producto(s) de la lista y quedará registrado en el historial. Recuerda actualizar el stock con +/− en el Inventario cuando los guardes.`, "Confirmar", () => {
-    const items = needed.map(p => ({ name: p.name }));
-    needed.forEach(p => updateProduct(p.id, { needsBuy: false }));
-    addHistoryEntry({ items, type: "purchase" });
-    clearShoppingCheckedFor(needed.map(p => p.id));
-    closeSheet();
-  });
+  openConfirmPurchaseSheet(needed);
 });
 
 $("#btnWhatsapp").addEventListener("click", () => {
@@ -1794,29 +1901,39 @@ function renderHistorial() {
     const d = h.createdAt?.toDate ? h.createdAt.toDate() : new Date();
     const dateLabel = d.toLocaleDateString("es-ES", { day: "numeric", month: "long", year: "numeric" });
     const isTicket = h.type === "ticket";
-    const isCooked = h.type === "cooked";
-    let headLabel, countLabel, rows;
-    if (isCooked) {
-      headLabel = `🍳 ${dateLabel} — ${escapeHtml(h.slotLabel || "")}`;
-      countLabel = "";
-      rows = `${(h.dishNames||[]).length ? `<div style="font-weight:600;margin-bottom:6px;">${escapeHtml((h.dishNames||[]).join(", "))}</div>` : ""}${(h.items || []).map(it => `<div>${escapeHtml(it.name)} — ${fmtNum(it.amount)} ${escapeHtml(it.unit||"")}</div>`).join("")}`;
-    } else if (isTicket) {
-      headLabel = `🧾 ${dateLabel}`;
-      countLabel = `${(h.items||[]).length} producto(s)`;
-      rows = (h.items || []).map(it => `<div>${escapeHtml(it.name)}${it.price ? " — " + escapeHtml(it.price) + " €" : ""}</div>`).join("");
-    } else {
-      headLabel = dateLabel;
-      countLabel = `${(h.items||[]).length} producto(s)`;
-      rows = (h.items || []).map(it => `<div>✓ ${escapeHtml(it.name)}</div>`).join("");
+    const isPurchase = !isTicket; // "purchase" (nuevo formato) y cualquier entrada antigua sin tipo reconocido
+
+    if (isPurchase) {
+      const rows = (h.items || []).map(it => `<div>${escapeHtml(it.name)}${it.amount != null ? ` — ${fmtNum(it.amount)} ${escapeHtml(it.unit || "")}` : ""}</div>`).join("");
+      return `
+        <div class="hist-entry" data-id="${h.id}">
+          <div class="hist-head purchase-card">
+            <div class="purchase-photo">${h.photo ? `<img src="${h.photo}">` : `<span>🧾</span>`}</div>
+            <div class="purchase-info">
+              <div class="purchase-top">
+                <span class="purchase-store">${escapeHtml(h.store || "Compra")}</span>
+                ${h.price != null ? `<span class="purchase-price">${fmtNum(h.price)} €</span>` : ""}
+              </div>
+              <div class="purchase-date">${dateLabel}</div>
+              <div class="purchase-count">${(h.items||[]).length} producto(s)</div>
+            </div>
+            <button class="dish-remove" data-act="delete-entry" data-id="${h.id}" title="Eliminar esta entrada">×</button>
+          </div>
+          <div class="hist-body">${rows}</div>
+        </div>`;
     }
+
+    // Formato antiguo de ticket escaneado (compatibilidad con entradas previas)
+    const headLabel = `🧾 ${dateLabel}`;
+    const countLabel = `${(h.items||[]).length} producto(s)`;
+    const rows = (h.items || []).map(it => `<div>${escapeHtml(it.name)}${it.price ? " — " + escapeHtml(it.price) + " €" : ""}</div>`).join("");
     return `
       <div class="hist-entry" data-id="${h.id}">
         <div class="hist-head">
           <span class="hist-date">${headLabel}</span>
           <span style="display:flex;align-items:center;gap:8px;">
             <span class="hist-count">${countLabel}</span>
-            ${isTicket ? `<button class="mini-link" data-act="export-ticket" data-id="${h.id}">Guardar</button>` : ""}
-            ${isCooked ? `<button class="mini-link" data-act="repeat-cooked" data-id="${h.id}">🔁 Repetir hoy</button>` : ""}
+            <button class="mini-link" data-act="export-ticket" data-id="${h.id}">Guardar</button>
             <button class="dish-remove" data-act="delete-entry" data-id="${h.id}" title="Eliminar esta entrada">×</button>
           </span>
         </div>
