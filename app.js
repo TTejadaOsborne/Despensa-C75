@@ -116,6 +116,7 @@ function switchView(name) {
   $$(".view").forEach(v => v.classList.toggle("active", v.id === "view-" + name));
   $("#fabAdd").style.display = name === "inventario" ? "flex" : "none";
   $("#fabNewRecipe").style.display = name === "menu" ? "flex" : "none";
+  $("#fabAddToShopping").style.display = name === "compra" ? "flex" : "none";
   if (name === "menu" && !menuScrolledToToday) {
     menuScrolledToToday = true;
     scrollToSelectedDay();
@@ -358,6 +359,97 @@ $("#invList").addEventListener("touchmove", () => clearTimeout(pressTimer));
 
 $("#fabAdd").addEventListener("click", () => openProductSheet(null));
 $("#fabNewRecipe").addEventListener("click", () => openRecipeEditor(null));
+$("#fabAddToShopping").addEventListener("click", () => openAddToShoppingSheet());
+
+function openAddToShoppingSheet() {
+  let filterText = "";
+  let creatingNew = false;
+  let newName = "";
+  let newLocation = "Despensa";
+  let newZone = ZONES[0];
+  let newUnit = "ud";
+
+  const render = () => {
+    const candidates = products
+      .filter(p => !p.needsBuy && p.name.toLowerCase().includes(filterText.toLowerCase()))
+      .sort((a, b) => a.name.localeCompare(b.name, "es"));
+    const byLoc = {};
+    candidates.forEach(p => { (byLoc[p.location] ||= []).push(p); });
+
+    const html = `
+      <div class="overlay" id="ovAddShop">
+        <div class="sheet">
+          <h3>Añadir a la compra</h3>
+          ${!creatingNew ? `
+            <input type="text" id="as-filter" class="re-search-input" placeholder="🔍 Buscar producto que ya tienes…" value="${escapeHtml(filterText)}">
+            <div class="ing-chip-picker">
+              ${candidates.length === 0
+                ? `<div style="padding:10px 4px;font-size:12.5px;color:var(--text-soft);">${filterText ? "Sin coincidencias." : "Ya está todo en la lista."}</div>`
+                : LOCATIONS.filter(loc => byLoc[loc]).map(loc => `
+                    <div class="ing-chip-loc">${escapeHtml(loc)}</div>
+                    <div class="ing-chip-wrap">
+                      ${byLoc[loc].map(p => `<button class="ing-chip" data-add-existing="${p.id}">${escapeHtml(p.name)}</button>`).join("")}
+                    </div>
+                  `).join("")}
+            </div>
+            <button class="re-toggle-link" id="as-newToggle">+ Crear producto nuevo</button>
+            <div class="sheet-actions" style="margin-top:14px;">
+              <button class="btn btn-secondary btn-block" id="as-close">Cerrar</button>
+            </div>
+          ` : `
+            <input type="text" id="as-name" class="re-name-input" placeholder="Nombre del producto nuevo" value="${escapeHtml(newName)}">
+            <div class="field-row">
+              <div class="field"><label>Ubicación</label>
+                <select id="as-location">${LOCATIONS.map(l => `<option ${l===newLocation?"selected":""}>${escapeHtml(l)}</option>`).join("")}</select>
+              </div>
+              <div class="field"><label>Zona</label>
+                <select id="as-zone">${ZONES.map(z => `<option ${z===newZone?"selected":""}>${escapeHtml(z)}</option>`).join("")}</select>
+              </div>
+            </div>
+            <div class="field"><label>Unidad</label>
+              <select id="as-unit">${UNITS.map(u => `<option value="${u.id}" ${u.id===newUnit?"selected":""}>${escapeHtml(u.label)}</option>`).join("")}</select>
+            </div>
+            <div class="sheet-actions">
+              <button class="btn btn-secondary" id="as-cancelNew">Volver a buscar</button>
+              <button class="btn btn-primary" id="as-createSave">Añadir</button>
+            </div>
+          `}
+        </div>
+      </div>`;
+    $("#modalRoot").innerHTML = html;
+    $("#ovAddShop").addEventListener("click", e => { if (e.target.id === "ovAddShop") closeSheet(); });
+    $("#as-close")?.addEventListener("click", closeSheet);
+
+    if (!creatingNew) {
+      const fInput = $("#as-filter");
+      fInput.addEventListener("input", e => { filterText = e.target.value; render(); });
+      if (filterText) { fInput.focus(); fInput.selectionStart = fInput.selectionEnd = fInput.value.length; }
+      $("#as-newToggle").addEventListener("click", () => { creatingNew = true; newName = filterText; render(); $("#as-name").focus(); });
+      $$('[data-add-existing]').forEach(chip => chip.addEventListener("click", () => {
+        const id = chip.dataset.addExisting;
+        updateProduct(id, { needsBuy: true });
+        setShoppingQty(id, 1);
+        render();
+      }));
+    } else {
+      $("#as-name").addEventListener("input", e => { newName = e.target.value; });
+      $("#as-location").addEventListener("change", e => { newLocation = e.target.value; });
+      $("#as-zone").addEventListener("change", e => { newZone = e.target.value; });
+      $("#as-unit").addEventListener("change", e => { newUnit = e.target.value; });
+      $("#as-cancelNew").addEventListener("click", () => { creatingNew = false; render(); });
+      $("#as-createSave").addEventListener("click", async () => {
+        const name = $("#as-name").value.trim();
+        if (!name) { $("#as-name").focus(); return; }
+        const ref = await addProduct({ name, location: newLocation, zone: newZone, unit: newUnit, stock: 0, needsBuy: true });
+        setShoppingQty(ref.id, 1);
+        creatingNew = false;
+        newName = ""; filterText = "";
+        render();
+      });
+    }
+  };
+  render();
+}
 $("#btnOpenCalendar").addEventListener("click", () => openCalendarPicker());
 $("#btnWeekView").addEventListener("click", () => openWeekView());
 
