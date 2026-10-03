@@ -3,7 +3,7 @@ import {
   listenProducts, addProduct, updateProduct, deleteProduct,
   listenRecipes, addRecipe, updateRecipe, deleteRecipe,
   listenMenu, setMealSlot,
-  listenHistory, addHistoryEntry, deleteHistoryEntry,
+  listenHistory, addHistoryEntry, deleteHistoryEntry, updateHistoryEntry,
   listenInspirations, addInspiration, deleteInspiration
 } from "./data.js";
 import {
@@ -1796,7 +1796,7 @@ function openConfirmPurchaseSheet(needed) {
           </div>
           <div class="field"><label>Precio total (opcional)</label><input type="number" id="pur-price" step="0.01" min="0" placeholder="0,00 €"></div>
           <div class="field"><label>Foto del ticket (opcional)</label>
-            <input type="file" accept="image/*" capture="environment" id="pur-photo">
+            <input type="file" accept="image/*" id="pur-photo">
             ${photoData ? `<img src="${photoData}" style="width:100%;border-radius:10px;margin-top:8px;">` : ""}
           </div>
           <div class="sheet-actions">
@@ -1835,6 +1835,143 @@ function openConfirmPurchaseSheet(needed) {
         photo: photoData
       });
       clearShoppingCheckedFor(needed.map(p => p.id));
+      closeSheet();
+    });
+  };
+  render();
+}
+
+function openEditPurchaseSheet(entry) {
+  let store = entry.store || "";
+  let photoData = entry.photo || null;
+  let filterText = "";
+
+  // Solo los artículos vinculados a un producto (productId) se pueden ajustar con inteligencia de diferencia.
+  // Los de formato muy antiguo (sin productId) se mantienen, pero no se pueden recalcular contra el inventario.
+  const editItems = {}; // productId -> cantidad
+  (entry.items || []).filter(it => it.productId).forEach(it => { editItems[it.productId] = it.amount ?? 1; });
+  const legacyItems = (entry.items || []).filter(it => !it.productId);
+
+  const render = () => {
+    const editedIds = Object.keys(editItems);
+    const candidates = products
+      .filter(p => !(p.id in editItems) && p.name.toLowerCase().includes(filterText.toLowerCase()))
+      .sort((a, b) => a.name.localeCompare(b.name, "es"));
+    const byLoc = {};
+    candidates.forEach(p => { (byLoc[p.location] ||= []).push(p); });
+
+    const html = `
+      <div class="overlay" id="ovEditPurchase">
+        <div class="sheet">
+          <h3>Editar compra</h3>
+          <div style="font-size:12.5px;color:var(--text-soft);margin-bottom:12px;">Ajusta los productos si hace falta — solo se corrige la diferencia en tu inventario, no se vuelve a sumar todo.</div>
+
+          <div id="eup-items">
+            ${editedIds.map(pid => {
+              const p = products.find(x => x.id === pid);
+              const original = (entry.items || []).find(it => it.productId === pid);
+              const name = p ? p.name : (original?.name || "Producto");
+              const u = p ? unitOf(p).short : (original?.unit || "");
+              return `
+                <div class="pick-row">
+                  <div class="pick-name"><div class="pick-name-title">${escapeHtml(name)}</div></div>
+                  <input type="number" step="any" min="0" data-eup-amount="${pid}" value="${editItems[pid]}">
+                  <span class="ing-unit">${escapeHtml(u)}</span>
+                  <button class="dish-remove" data-eup-remove="${pid}" title="Quitar">×</button>
+                </div>`;
+            }).join("")}
+            ${legacyItems.map((it, i) => `
+              <div class="pick-row">
+                <div class="pick-name"><div class="pick-name-title">${escapeHtml(it.name)}</div><div class="pick-name-sub">sin cantidad registrada — no ajustable</div></div>
+                <button class="dish-remove" data-eup-removeLegacy="${i}" title="Quitar">×</button>
+              </div>`).join("")}
+          </div>
+
+          <input type="text" id="eup-filter" class="re-search-input" placeholder="🔍 Añadir otro producto…" value="${escapeHtml(filterText)}">
+          <div class="ing-chip-picker">
+            ${candidates.length === 0
+              ? (filterText ? `<div style="padding:8px 4px;font-size:12px;color:var(--text-soft);">Sin coincidencias.</div>` : "")
+              : LOCATIONS.filter(loc => byLoc[loc]).map(loc => `
+                  <div class="ing-chip-loc">${escapeHtml(loc)}</div>
+                  <div class="ing-chip-wrap">${byLoc[loc].map(p => `<button class="ing-chip" data-eup-add="${p.id}">${escapeHtml(p.name)}</button>`).join("")}</div>
+                `).join("")}
+          </div>
+
+          <div class="field" style="margin-top:14px;"><label>Tienda</label>
+            <div class="ing-chip-wrap" style="margin-bottom:8px;">
+              <button class="ing-chip store-chip ${store==="Mercadona"?"on":""}" data-store="Mercadona">Mercadona</button>
+              <button class="ing-chip store-chip ${store==="BM"?"on":""}" data-store="BM">BM</button>
+            </div>
+            <input type="text" id="eup-store" placeholder="O escribe otra tienda" value="${escapeHtml(store)}">
+          </div>
+          <div class="field"><label>Precio total (opcional)</label><input type="number" id="eup-price" step="0.01" min="0" placeholder="0,00 €" value="${entry.price != null ? entry.price : ""}"></div>
+          <div class="field"><label>Foto del ticket (opcional)</label>
+            <input type="file" accept="image/*" id="eup-photo">
+            ${photoData ? `
+              <div style="position:relative;margin-top:8px;">
+                <img src="${photoData}" style="width:100%;border-radius:10px;display:block;">
+                <button id="eup-removePhoto" style="position:absolute;top:8px;right:8px;background:white;border:none;border-radius:50%;width:28px;height:28px;color:var(--danger);font-size:16px;">×</button>
+              </div>` : ""}
+          </div>
+          <div class="sheet-actions">
+            <button class="btn btn-secondary" id="eup-cancel">Cancelar</button>
+            <button class="btn btn-primary" id="eup-save">Guardar</button>
+          </div>
+        </div>
+      </div>`;
+    $("#modalRoot").innerHTML = html;
+    $("#eup-cancel").addEventListener("click", closeSheet);
+    $("#ovEditPurchase").addEventListener("click", e => { if (e.target.id === "ovEditPurchase") closeSheet(); });
+
+    $$('[data-eup-amount]').forEach(inp => {
+      inp.addEventListener("click", e => e.stopPropagation());
+      inp.addEventListener("change", () => { editItems[inp.dataset.eupAmount] = inp.value === "" ? 0 : Number(inp.value); render(); });
+      inp.addEventListener("focus", () => inp.select());
+    });
+    $$('[data-eup-remove]').forEach(btn => btn.addEventListener("click", () => { delete editItems[btn.dataset.eupRemove]; render(); }));
+    $$('[data-eup-removeLegacy]').forEach(btn => btn.addEventListener("click", () => { legacyItems.splice(Number(btn.dataset.eupRemoveLegacy), 1); render(); }));
+    $$('[data-eup-add]').forEach(chip => chip.addEventListener("click", () => { editItems[chip.dataset.eupAdd] = 1; filterText = ""; render(); }));
+
+    const fInput = $("#eup-filter");
+    fInput.addEventListener("input", e => { filterText = e.target.value; render(); });
+    if (filterText) { fInput.focus(); fInput.selectionStart = fInput.selectionEnd = fInput.value.length; }
+
+    $$('#ovEditPurchase .store-chip').forEach(chip => chip.addEventListener("click", () => { store = chip.dataset.store; render(); }));
+    $("#eup-store").addEventListener("input", e => { store = e.target.value; });
+    $("#eup-photo").addEventListener("change", async e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      photoData = await compressPhotoToDataURL(file);
+      render();
+    });
+    $("#eup-removePhoto")?.addEventListener("click", () => { photoData = null; render(); });
+
+    $("#eup-save").addEventListener("click", () => {
+      const oldMap = {};
+      (entry.items || []).filter(it => it.productId).forEach(it => { oldMap[it.productId] = it.amount ?? 0; });
+      const allIds = new Set([...Object.keys(oldMap), ...Object.keys(editItems)]);
+      allIds.forEach(pid => {
+        const delta = (Number(editItems[pid]) || 0) - (Number(oldMap[pid]) || 0);
+        if (!delta) return;
+        const p = products.find(x => x.id === pid);
+        if (!p) return;
+        const next = Math.round((p.stock + delta + Number.EPSILON) * 100) / 100;
+        updateProduct(p.id, { stock: next });
+      });
+      const newItems = [
+        ...Object.entries(editItems).map(([pid, amt]) => {
+          const p = products.find(x => x.id === pid);
+          return { productId: pid, name: p ? p.name : "", amount: Number(amt) || 0, unit: p ? unitOf(p).short : "" };
+        }),
+        ...legacyItems
+      ];
+      const price = $("#eup-price").value;
+      updateHistoryEntry(entry.id, {
+        items: newItems,
+        store: store.trim() || null,
+        price: price ? Number(price) : null,
+        photo: photoData
+      });
       closeSheet();
     });
   };
@@ -2009,6 +2146,7 @@ function renderHistorial() {
               <div class="purchase-date">${dateLabel}</div>
               <div class="purchase-count">${(h.items||[]).length} producto(s)</div>
             </div>
+            <button class="purchase-edit" data-act="edit-purchase" data-id="${h.id}" title="Editar tienda, precio o foto">✏️</button>
             <button class="dish-remove" data-act="delete-entry" data-id="${h.id}" title="Eliminar esta entrada">×</button>
           </div>
           <div class="hist-body">${rows}</div>
@@ -2037,6 +2175,14 @@ function renderHistorial() {
   }).join("");
 }
 $("#histList").addEventListener("click", e => {
+  const editBtn = e.target.closest('[data-act="edit-purchase"]');
+  if (editBtn) {
+    e.stopPropagation();
+    const entry = history.find(h => h.id === editBtn.dataset.id);
+    if (!entry) return;
+    openEditPurchaseSheet(entry);
+    return;
+  }
   const deleteBtn = e.target.closest('[data-act="delete-entry"]');
   if (deleteBtn) {
     e.stopPropagation();

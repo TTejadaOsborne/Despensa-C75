@@ -151,6 +151,10 @@ export async function deleteHistoryEntry(id) {
   return deleteDoc(doc(db, "history", id));
 }
 
+export async function updateHistoryEntry(id, patch) {
+  return updateDoc(doc(db, "history", id), patch);
+}
+
 // --- Ideas de inspiración (enlaces externos: web, Instagram, TikTok, YouTube...) ---
 export function listenInspirations(cb) {
   const q = query(inspirationsCol, orderBy("createdAt", "desc"));

@@ -724,6 +724,15 @@ main {
 .purchase-price { font-size: 15px; font-weight: 700; color: var(--primary); flex-shrink: 0; }
 .purchase-date { font-size: 11.5px; color: var(--text-soft); margin-top: 1px; }
 .purchase-count { font-size: 11px; color: var(--text-soft); margin-top: 1px; }
+.purchase-edit {
+  flex-shrink: 0;
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  border: none;
+  background: var(--bg);
+  font-size: 13px;
+  cursor: pointer;
+}
 .ing-chip.store-chip.on { background: var(--primary); border-color: var(--primary); color: white; }
 
 /* Bottom nav */
